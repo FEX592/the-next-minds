@@ -1,0 +1,1 @@
+ALTER TABLE `emailConfig` ADD `apiKeyEncrypted` text;
