@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, gt, isNull, inArray, lt, or, like } from "drizzle-orm";
 import { z } from "zod";
 import { getCountries, getCountryCallingCode } from "libphonenumber-js";
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies.js";
 import { systemRouter } from "./_core/systemRouter.js";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc.js";

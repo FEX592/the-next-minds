@@ -73,4 +73,6 @@ For a brand-new Supabase project, `supabase/schema.sql` is a ready-to-run altern
 4. **Set environment variables** in the Vercel project (`Settings → Environment Variables`): `DATABASE_URL`, `JWT_SECRET`, and the other variables from the table above as needed. Skip `BOOTSTRAP_ADMIN_TOKEN` unless you want to require a setup token.
 5. **Deploy.** Then visit `/auth` on the deployed URL to create the first administrator — this only works once, while the `users` table is empty.
 
+The repo ships a `.npmrc` with `node-linker=hoisted`, which makes pnpm lay out `node_modules` flat instead of its default symlinked structure. Vercel's function bundler traces dependencies more reliably against a flat layout — without it, some packages can fail to resolve at runtime even though the build succeeds. Keep this file if you regenerate `pnpm-lock.yaml`.
+
 Never place passwords, API keys, OAuth secrets, or database credentials in source files, client bundles, screenshots, or committed environment files.

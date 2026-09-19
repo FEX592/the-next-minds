@@ -1,5 +1,5 @@
-import { COOKIE_NAME } from "@shared/const";
-import { ForbiddenError } from "@shared/_core/errors";
+import { COOKIE_NAME } from "../../shared/const.js";
+import { ForbiddenError } from "../../shared/_core/errors.js";
 import { parse as parseCookieHeader } from "cookie";
 import { jwtVerify } from "jose";
 import type { Request } from "express";

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { SignJWT } from "jose";
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
-import { COOKIE_NAME, ONE_YEAR_MS, safeAdminReturnTo } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS, safeAdminReturnTo } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies.js";
 import * as db from "./db.js";
 
