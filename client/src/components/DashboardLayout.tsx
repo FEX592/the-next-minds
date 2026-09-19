@@ -65,7 +65,7 @@ export default function DashboardLayout({
               Sign in to continue
             </h1>
             <p className="text-sm text-muted-foreground text-center max-w-sm">
-              Access to this dashboard requires a local account. Continue to sign in with your project credentials.
+              Access to this dashboard requires an account. Continue to sign in with your project credentials.
             </p>
           </div>
           <Button

@@ -1,12 +1,17 @@
 import crypto from "node:crypto";
 import { and, desc, eq, gt, isNull, like, or } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import { adminInvites, auditLogs, emailConfig, emailLogs, emailMedia, emailTemplates, InsertUser, notificationPreferences, notifications, registrations, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { DEFAULT_BODY, DEFAULT_HTML, decryptProviderKey } from "./email";
 let _db: ReturnType<typeof drizzle> | null = null;
-export async function getDb(){if(!_db&&process.env.DATABASE_URL){try{_db=drizzle(process.env.DATABASE_URL)}catch{_db=null}}return _db}
-export async function upsertUser(user:InsertUser){const db=await getDb();if(!db||!user.openId)return;const values:InsertUser={openId:user.openId,name:user.name??null,email:user.email??null,loginMethod:user.loginMethod??null,lastSignedIn:user.lastSignedIn??new Date()};const updateSet:any={name:values.name,email:values.email,loginMethod:values.loginMethod,lastSignedIn:values.lastSignedIn};if(user.role){values.role=user.role;updateSet.role=user.role}else if(user.openId===ENV.ownerOpenId){values.role="admin";updateSet.role="admin"}await db.insert(users).values(values).onDuplicateKeyUpdate({set:updateSet})}
+// `prepare: false` is required when connecting through Supabase's Supavisor
+// transaction-mode pooler (the 6543 connection string) — that pooler does
+// not support prepared statements. Harmless against the direct/session
+// connection string too, so it's left on unconditionally.
+export async function getDb(){const url=process.env.DATABASE_URL||process.env.POSTGRES_URL;if(!_db&&url){try{_db=drizzle(postgres(url,{prepare:false,ssl:"require"}))}catch{_db=null}}return _db}
+export async function upsertUser(user:InsertUser){const db=await getDb();if(!db||!user.openId)return;const values:InsertUser={openId:user.openId,name:user.name??null,email:user.email??null,loginMethod:user.loginMethod??null,lastSignedIn:user.lastSignedIn??new Date()};const updateSet:any={name:values.name,email:values.email,loginMethod:values.loginMethod,lastSignedIn:values.lastSignedIn};if(user.role){values.role=user.role;updateSet.role=user.role}else if(user.openId===ENV.ownerOpenId){values.role="admin";updateSet.role="admin"}await db.insert(users).values(values).onConflictDoUpdate({target:users.openId,set:updateSet})}
 export async function getUserByOpenId(openId:string){const db=await getDb();if(!db)return;const rows=await db.select().from(users).where(eq(users.openId,openId)).limit(1);return rows[0]}
 export async function getUserByEmail(email:string){const db=await getDb();if(!db)return;const rows=await db.select().from(users).where(eq(users.email,email)).limit(1);return rows[0]}
 export async function countUsers(){const db=await getDb();if(!db)return 0;const rows=await db.select({id:users.id}).from(users);return rows.length}
