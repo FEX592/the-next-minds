@@ -3,8 +3,8 @@ import { SignJWT } from "jose";
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS, safeAdminReturnTo } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
-import * as db from "./db";
+import { getSessionCookieOptions } from "./_core/cookies.js";
+import * as db from "./db.js";
 
 const passwordSchema = z.string().min(8, "Password must be at least 8 characters").max(200);
 const emailSchema = z.string().trim().email().max(320).transform(value => value.toLowerCase());

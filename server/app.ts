@@ -1,11 +1,11 @@
 import "dotenv/config";
 import express from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerLocalAuthRoutes } from "./local-auth";
-import { registerStorageProxy } from "./_core/storageProxy";
-import { appRouter } from "./routers";
-import { ensureDefaults } from "./db";
-import { createContext } from "./_core/context";
+import { registerLocalAuthRoutes } from "./local-auth.js";
+import { registerStorageProxy } from "./_core/storageProxy.js";
+import { appRouter } from "./routers.js";
+import { ensureDefaults } from "./db.js";
+import { createContext } from "./_core/context.js";
 
 /**
  * Builds the Express app with every route mounted, but does NOT call

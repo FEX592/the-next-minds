@@ -2,7 +2,7 @@ import { trpc } from "@/lib/trpc";
 import { ArrowLeft, ArrowRight, Check, ChevronDown, Copy, Loader2, MapPin, Share2, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-const BRAND = "/manus-storage/next-mind-brand_d0acb55f.jpg";
+const BRAND = "/next-mind-logo.png";
 const SHARE_TEXT = `Wait… you’re a student, apprentice, or Pathfinder and you’re not yet in THE NEXT MIND?? 😒😂\n\nHmm… ahh. Something is not adding up. 👀\n\nTHE NEXT MIND is a free September initiative by Coach Jam Digital Solutions, created to help young learners understand how to actually use AI for studying, research, creativity, projects, and building useful digital skills.\n\nAnd yes… there’s a 12-month Gemini offer for eligible participants, where available. 🎁\n\nThis one is not just “AI class.” You need to see what we’re cooking. 👀🔥\n\n📲 Register here: ${window.location.origin}\n\n#TheNextMind #JAMTOTHEWORLD`;
 const steps = ["Name","WhatsApp","Class / level","School","Email","Review"];
 

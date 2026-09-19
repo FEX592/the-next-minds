@@ -1,4 +1,4 @@
-import { createApp } from "../server/app";
+import { createApp } from "../server/app.js";
 
 // Vercel's Node.js runtime accepts a plain (req, res) handler as the
 // default export, and an Express app IS one — so this is the entire
