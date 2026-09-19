@@ -5,7 +5,7 @@
 :root { --background:#05070d; --foreground:#f7f8fb; --card:#0d111b; --card-foreground:#f7f8fb; --primary:#f6c928; --primary-foreground:#17120a; --muted:#141b2a; --muted-foreground:#a5aec0; --border:#243148; --input:#152036; --ring:#f6c928; --radius:.95rem; }
 * { box-sizing:border-box; }
 html, body, #root { min-height:100%; }
-body { margin:0; background:var(--background) url('/manus-storage/WhatsAppImage2026-09-16at12.59.07_71affef1.jpeg') center/cover fixed no-repeat; color:var(--foreground); font-family:'DM Sans',system-ui,sans-serif; }
+body { margin:0; background:var(--background) url('/manus-storage/next-mind-brand_d0acb55f.jpg') center/cover fixed no-repeat; color:var(--foreground); font-family:'DM Sans',system-ui,sans-serif; }
 button, input, select, textarea { font:inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline:2px solid #f6c928; outline-offset:2px; }
 .font-display { font-family:'Space Grotesk',system-ui,sans-serif; }
