@@ -1,0 +1,23 @@
+from pathlib import Path
+
+p=Path('/home/ubuntu/the-next-mind/server/routers.ts')
+s=p.read_text()
+s=s.replace('"SS 1", "SS 2", "SS 3"], Ghana:', '"SS 1", "SS 2", "SS 3", "University / undergraduate", "Graduate / postgraduate"], Ghana:')
+s=s.replace('"SHS 1", "SHS 2", "SHS 3"], "United Kingdom":', '"SHS 1", "SHS 2", "SHS 3", "University / undergraduate", "Graduate / postgraduate"], "United Kingdom":')
+s=s.replace('"Year 11", "Sixth Form"], "United States":', '"Year 11", "Sixth Form", "University / undergraduate", "Graduate / postgraduate"], "United States":')
+s=s.replace('"Grade 11", "Grade 12"] };', '"Grade 11", "Grade 12", "University / undergraduate", "Graduate / postgraduate"] };')
+s=s.replace('const genericLevels = ["Middle school", "High school", "College / university", "Apprentice / vocational", "Other"];', 'const genericLevels = ["Middle school", "High school", "University / undergraduate", "Graduate / postgraduate", "Apprentice / vocational", "Other"];')
+s=s.replace('provider: z.literal("resend")', 'provider: z.enum(["resend", "gmail"])')
+p.write_text(s)
+
+p=Path('/home/ubuntu/the-next-mind/client/src/pages/Admin.tsx')
+s=p.read_text()
+s=s.replace('const [senderName,setSenderName]=useState(""); const [senderEmail,setSenderEmail]=useState(""); const [apiKey,setApiKey]=useState("");', 'const [senderName,setSenderName]=useState(""); const [senderEmail,setSenderEmail]=useState(""); const [apiKey,setApiKey]=useState(""); const [provider,setProvider]=useState<"resend"|"gmail">("gmail");')
+s=s.replace('setSenderName(c.senderName);setSenderEmail(c.senderEmail);setReplyTo(c.replyTo||"");setApiKey("")', 'setSenderName(c.senderName);setSenderEmail(c.senderEmail);setReplyTo(c.replyTo||"");setApiKey("");setProvider(c.provider==="gmail"?"gmail":"resend")')
+s=s.replace('<label className="text-sm text-slate-300">Shared Resend API key', '<label className="text-sm text-slate-300">Email provider<select value={provider} onChange={e=>setProvider(e.target.value as "resend"|"gmail")} className="mt-2 w-full rounded-xl border border-white/10 bg-[#101827] px-4 py-3 text-white"><option value="gmail">Gmail (OAuth)</option><option value="resend">Resend API key</option></select></label><label className="text-sm text-slate-300">{provider==="gmail"?"Gmail connection":"Shared Resend API key"}')
+s=s.replace('placeholder={(q.data?.config as any)?.hasApiKey?"Saved securely — enter a new key to replace it":"re_..."}', 'placeholder={provider==="gmail"?"Connect Gmail OAuth to enable sending":((q.data?.config as any)?.hasApiKey?"Saved securely — enter a new key to replace it":"re_...")}')
+s=s.replace('type="password" value={apiKey}', 'type="password" value={provider==="gmail"?"":apiKey}')
+s=s.replace('<span className="mt-2 block text-xs text-slate-500">Shared with every authorized admin. The saved key is encrypted at rest and never displayed.</span>', '<span className="mt-2 block text-xs text-slate-500">{provider==="gmail"?"Gmail OAuth connection will be shared by every authorized admin. OAuth credentials are required before sending.":"Shared with every authorized admin. The saved key is encrypted at rest and never displayed."}</span>')
+s=s.replace('Provider: <strong className="text-white">Resend API</strong><br/>Credentials remain server-side and are never returned to the browser.', 'Provider: <strong className="text-white">{provider==="gmail"?"Gmail":"Resend API"}</strong><br/>{provider==="gmail"?"Gmail is not connected yet. Configure OAuth credentials to enable the Connect Gmail action.":"Credentials remain server-side and are never returned to the browser."}')
+s=s.replace('saveConfig.mutate({senderName,senderEmail,replyTo,apiKey:apiKey||undefined,provider:"resend",enabled:true})', 'saveConfig.mutate({senderName,senderEmail,replyTo,apiKey:provider==="resend"?(apiKey||undefined):undefined,provider,enabled:true})')
+p.write_text(s)
