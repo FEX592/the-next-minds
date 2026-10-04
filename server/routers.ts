@@ -6,7 +6,8 @@ import { COOKIE_NAME } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies.js";
 import { systemRouter } from "./_core/systemRouter.js";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc.js";
-import { createAudit, createEmailLog, createNotification, deleteRegistration, ensureDefaults, getConfig, getDb, getEmailMedia, getRegistration, getStats, listRegistrations, updateEmailLog, updateLocalAccount } from "./db.js";
+import { createAudit, createEmailLog, createNotification, createProgram, createSpeaker, deleteCommunityLink, deleteRegistration, deleteSpeaker, ensureDefaults, getConfig, getDb, getEmailMedia, getProgramById, getProgramSpeakers, getProgramWebinarDetails, getPublicProgramBundle, getRegistration, getSiteSettings, getStats, listCommunityLinks, listPrograms, listRegistrations, listSpeakers, setProgramSpeakers, updateEmailLog, updateLocalAccount, updateProgram, updateSiteSettings, updateSpeaker, upsertCommunityLink, upsertProgramWebinarDetails } from "./db.js";
+import { buildConfirmationEmail, REGISTRATION_CLOSED_MESSAGE, registrationState, resolveCommunity, toPublicProgram } from "./programs.js";
 import { DEFAULT_BODY, DEFAULT_HTML, DEFAULT_SUBJECT, renderTemplate, sendEmail, textToEmailHtml } from "./email.js";
 import { hashPassword, verifyPassword } from "./local-auth.js";
 import { ENV } from "./_core/env.js";
@@ -38,7 +39,7 @@ async function sendConfiguredEmail(input: { category: string; recipient: string;
   // protection against double-submission. Manual sends (general broadcasts, test
   // emails) have no such identity; each click is intentionally a new, distinct
   // send, so they're never deduped against one another.
-  const idempotencyKey = input.category === "ACCEPTANCE" && input.registrationId ? `accept-${input.registrationId}` : null;
+  const idempotencyKey = input.registrationId && (input.category === "ACCEPTANCE" || input.category === "CONFIRMATION") ? `${input.category === "ACCEPTANCE" ? "accept" : "confirm"}-${input.registrationId}` : null;
   if (idempotencyKey) {
     const alreadySent = await db.select().from(emailLogs).where(and(eq(emailLogs.idempotencyKey, idempotencyKey), eq(emailLogs.status, "SENT"))).limit(1);
     if (alreadySent[0]) return { ok: true as const, id: alreadySent[0].providerMessageId ?? String(alreadySent[0].id) };
@@ -53,6 +54,31 @@ async function sendConfiguredEmail(input: { category: string; recipient: string;
   return result;
 }
 
+const isUniqueViolation = (error: any) => error?.code === "23505" || error?.cause?.code === "23505" || String(error?.message ?? "").toLowerCase().includes("duplicate");
+const slugSchema = z.string().trim().min(1).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers and hyphens only.");
+const optText = (max: number) => z.string().max(max).nullable();
+const optUrl = (max: number) => z.string().url().max(max).nullable();
+const programTypeInput = z.enum(["WEBINAR", "WORKSHOP", "COURSE", "CHALLENGE", "TRAINING", "COMMUNITY_INITIATIVE", "OTHER"]);
+const programStatusInput = z.enum(["UPCOMING", "ONGOING", "COMPLETED"]);
+const programFields = {
+  slug: slugSchema, title: z.string().trim().min(1).max(240), shortDescription: z.string().nullable(), fullDescription: z.string().nullable(), coverImageUrl: optUrl(700),
+  type: programTypeInput, status: programStatusInput, startAt: z.date().nullable(), durationMinutes: z.number().int().positive().nullable(), locationOrPlatform: optText(240),
+  whatParticipantsWillLearn: z.string().nullable(), whoItsFor: z.string().nullable(), registrationEnabled: z.boolean(), registrationDeadline: z.date().nullable(), registrationCtaLabel: optText(80),
+  additionalResources: z.string().nullable(), whatsappLinkOverride: optUrl(500), telegramLinkOverride: optUrl(500), takeawayCourseTitle: optText(240), takeawayCourseUrl: optUrl(700),
+  seoTitle: optText(240), seoDescription: optText(400), seoImageUrl: optUrl(700),
+};
+const programCreateInput = z.object(programFields).partial().required({ slug: true, title: true });
+const programUpdateInput = z.object(programFields).partial().extend({ id: z.number().int().positive() });
+const speakerFields = { name: z.string().trim().min(1).max(160), photoUrl: z.string().url().max(700), role: z.string().max(160), bio: z.string(), socialLinks: z.string(), website: z.string().url().max(500) };
+
+async function sendProgramConfirmation(program: NonNullable<Awaited<ReturnType<typeof getProgramById>>>, reg: { id: number; firstName: string; email: string }) {
+  const [webinar, links] = await Promise.all([getProgramWebinarDetails(program.id), listCommunityLinks({ activeOnly: true })]);
+  const community = resolveCommunity(program, links);
+  const { subject, body } = buildConfirmationEmail({ firstName: reg.firstName, program, joinLink: webinar?.joinLink, ...community });
+  const result = await sendConfiguredEmail({ category: "CONFIRMATION", recipient: reg.email, subject, body, html: DEFAULT_HTML(textToEmailHtml(body)), registrationId: reg.id });
+  return { sent: result.ok, community };
+}
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -64,11 +90,78 @@ export const appRouter = router({
   public: router({
     countries: publicProcedure.query(() => countries),
     levels: publicProcedure.input(z.object({ country: z.string() })).query(({ input }) => levels[input.country] ?? []),
-    register: publicProcedure.input(z.object({ firstName: z.string().trim().min(1).max(120), lastName: z.string().trim().min(1).max(120), country: z.string(), countryCode: z.string(), whatsappNumber: z.string().min(5).max(40), classLevel: z.string(), school: z.string().trim().min(2).max(240), email: z.string().email().max(320) })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Registration service is unavailable"); const validCountry = countries.find(c => c.name === input.country && c.code === input.countryCode); if (!validCountry || !(levels[input.country] ?? []).includes(input.classLevel)) throw new Error("Please check your country and class selection."); const digits = input.whatsappNumber.replace(/\D/g, ""); const normalized = input.countryCode + digits.replace(/^0+/, ""); try { await db.insert(registrations).values({ ...input, whatsappNumber: digits, normalizedWhatsapp: normalized, status: "PENDING" }); const inserted = await db.select({ id: registrations.id }).from(registrations).where(eq(registrations.normalizedWhatsapp, normalized)).orderBy(desc(registrations.id)).limit(1); await createNotification("New registration received", `New registration received from ${input.firstName} ${input.lastName}.`, inserted[0]?.id, "newRegistration"); return { success: true }; } catch (error: any) { if (String(error?.message ?? error).toLowerCase().includes("duplicate")) throw new Error("A registration with these contact details already exists."); throw new Error("We couldn't save your registration. Please try again."); } }),
+    register: publicProcedure.input(z.object({ programId: z.number().int().positive().optional(), firstName: z.string().trim().min(1).max(120), lastName: z.string().trim().min(1).max(120), country: z.string(), countryCode: z.string(), whatsappNumber: z.string().min(5).max(40), classLevel: z.string(), school: z.string().trim().min(2).max(240), email: z.string().trim().email().max(320) })).mutation(async ({ input }) => {
+      const db = await getDb(); if (!db) throw new Error("Registration service is unavailable");
+      const validCountry = countries.find(c => c.name === input.country && c.code === input.countryCode);
+      if (!validCountry || !(levels[input.country] ?? []).includes(input.classLevel)) throw new Error("Please check your country and class selection.");
+      const { programId, ...person } = input;
+      const program = programId ? await getProgramById(programId, { publishedOnly: true }) : null;
+      if (programId) {
+        if (!program) throw new Error(REGISTRATION_CLOSED_MESSAGE.unavailable);
+        const gate = registrationState(program);
+        if (!gate.open) throw new Error(REGISTRATION_CLOSED_MESSAGE[gate.reason]);
+      }
+      const digits = input.whatsappNumber.replace(/\D/g, "");
+      const normalized = input.countryCode + digits.replace(/^0+/, "");
+      const email = input.email.toLowerCase();
+      let created: { id: number } | undefined;
+      try {
+        // Program registrations are confirmed immediately (PRD flow); the legacy no-program flow keeps manual review.
+        const rows = await db.insert(registrations).values({ ...person, email, programId: program?.id ?? null, whatsappNumber: digits, normalizedWhatsapp: normalized, status: program ? "ACCEPTED" : "PENDING", reviewedAt: program ? new Date() : null }).returning({ id: registrations.id });
+        created = rows[0];
+      } catch (error: any) {
+        if (isUniqueViolation(error)) throw new Error(program ? "You are already registered for this program." : "A registration with these contact details already exists.");
+        throw new Error("We couldn't save your registration. Please try again.");
+      }
+      await createNotification("New registration received", `New registration from ${input.firstName} ${input.lastName}${program ? ` for ${program.title}` : ""}.`, created?.id, "newRegistration").catch(() => {});
+      if (!program || !created) return { success: true as const, program: null, emailSent: false, community: {} as { whatsapp?: string; telegram?: string } };
+      const confirmation = await sendProgramConfirmation(program, { id: created.id, firstName: input.firstName, email }).catch(() => ({ sent: false, community: {} as { whatsapp?: string; telegram?: string } }));
+      return { success: true as const, program: { title: program.title, slug: program.slug }, emailSent: confirmation.sent, community: confirmation.community };
+    }),
+    programs: publicProcedure.input(z.object({ type: programTypeInput.optional(), status: programStatusInput.optional() }).optional()).query(async ({ input }) => {
+      const rows = await listPrograms({ publishedOnly: true, ...input });
+      return rows.map(p => ({ ...toPublicProgram(p), registrationOpen: registrationState(p).open }));
+    }),
+    program: publicProcedure.input(z.object({ slug: z.string().min(1).max(160) })).query(async ({ input }) => {
+      const bundle = await getPublicProgramBundle(input.slug);
+      if (!bundle) return null;
+      const { program, webinar, speakers, links } = bundle;
+      const gate = registrationState(program);
+      return {
+        program: { ...toPublicProgram(program), registrationOpen: gate.open, registrationClosedMessage: gate.open ? null : REGISTRATION_CLOSED_MESSAGE[gate.reason] },
+        // Join link only while live, recording only once completed — upcoming join links go out via the confirmation email.
+        webinar: webinar ? { subtitle: webinar.subtitle, highlights: webinar.highlights, joinLink: program.status === "ONGOING" ? webinar.joinLink : null, recordingUrl: program.status === "COMPLETED" ? webinar.recordingUrl : null } : null,
+        speakers: speakers.filter(x => x.speaker).map(x => ({ topic: x.topic, displayOrder: x.displayOrder, ...x.speaker! })),
+        community: resolveCommunity(program, links),
+      };
+    }),
+    communityLinks: publicProcedure.query(async () => (await listCommunityLinks({ activeOnly: true })).map(({ key, label, platform, url, description }) => ({ key, label, platform, url, description }))),
+    siteSettings: publicProcedure.query(async () => {
+      const settings = await getSiteSettings();
+      const featured = settings?.featuredProgramId ? await getProgramById(settings.featuredProgramId, { publishedOnly: true }) : null;
+      return { heroHeadline: settings?.heroHeadline ?? null, heroSubheadline: settings?.heroSubheadline ?? null, aboutShortText: settings?.aboutShortText ?? null, featuredProgram: featured ? { ...toPublicProgram(featured), registrationOpen: registrationState(featured).open } : null };
+    }),
   }),
   admin: router({
+    programs: adminOnly.query(() => listPrograms()),
+    program: adminOnly.input(z.object({ id: z.number().int().positive() })).query(async ({ input }) => { const program = await getProgramById(input.id); if (!program) throw new Error("Program not found."); return { program, webinar: await getProgramWebinarDetails(program.id), speakers: await getProgramSpeakers(program.id) }; }),
+    createProgram: adminOnly.input(programCreateInput).mutation(async ({ ctx, input }) => { try { const row = await createProgram({ ...input, createdBy: ctx.user.id, updatedBy: ctx.user.id }); await createAudit(`Created program ${input.slug}`, ctx.user.id); return row; } catch (e: any) { if (isUniqueViolation(e)) throw new Error("That slug is already in use."); throw e; } }),
+    updateProgram: adminOnly.input(programUpdateInput).mutation(async ({ ctx, input }) => { const { id, ...values } = input; try { const row = await updateProgram(id, { ...values, updatedBy: ctx.user.id }); if (!row) throw new Error("Program not found."); await createAudit(`Updated program ${row.slug}`, ctx.user.id); return row; } catch (e: any) { if (isUniqueViolation(e)) throw new Error("That slug is already in use."); throw e; } }),
+    setProgramPublished: adminOnly.input(z.object({ id: z.number().int().positive(), published: z.boolean() })).mutation(async ({ ctx, input }) => { const row = await updateProgram(input.id, { publishedAt: input.published ? new Date() : null, updatedBy: ctx.user.id }); await createAudit(`${input.published ? "Published" : "Unpublished"} program ${row?.slug ?? input.id}`, ctx.user.id); return row; }),
+    setProgramArchived: adminOnly.input(z.object({ id: z.number().int().positive(), archived: z.boolean() })).mutation(async ({ ctx, input }) => { const row = await updateProgram(input.id, { archivedAt: input.archived ? new Date() : null, updatedBy: ctx.user.id }); await createAudit(`${input.archived ? "Archived" : "Restored"} program ${row?.slug ?? input.id}`, ctx.user.id); return row; }),
+    saveWebinarDetails: adminOnly.input(z.object({ programId: z.number().int().positive(), subtitle: optText(240), joinLink: optUrl(700), recordingUrl: optUrl(700), highlights: z.string().nullable() })).mutation(async ({ ctx, input }) => { const { programId, ...values } = input; await upsertProgramWebinarDetails(programId, values); await createAudit(`Updated webinar details for program ${programId}`, ctx.user.id); return { success: true as const }; }),
+    setProgramSpeakers: adminOnly.input(z.object({ programId: z.number().int().positive(), speakers: z.array(z.object({ speakerId: z.number().int().positive(), topic: z.string().max(240).optional(), displayOrder: z.number().int().optional() })).max(30) })).mutation(async ({ ctx, input }) => { await setProgramSpeakers(input.programId, input.speakers); await createAudit(`Updated speakers for program ${input.programId}`, ctx.user.id); return { success: true as const }; }),
+    speakers: adminOnly.query(() => listSpeakers()),
+    createSpeaker: adminOnly.input(z.object({ name: speakerFields.name, photoUrl: speakerFields.photoUrl.optional(), role: speakerFields.role.optional(), bio: speakerFields.bio.optional(), socialLinks: speakerFields.socialLinks.optional(), website: speakerFields.website.optional() })).mutation(async ({ ctx, input }) => { const row = await createSpeaker(input); await createAudit(`Created speaker ${input.name}`, ctx.user.id); return row; }),
+    updateSpeaker: adminOnly.input(z.object({ id: z.number().int().positive(), name: speakerFields.name.optional(), photoUrl: speakerFields.photoUrl.optional(), role: speakerFields.role.optional(), bio: speakerFields.bio.optional(), socialLinks: speakerFields.socialLinks.optional(), website: speakerFields.website.optional() })).mutation(async ({ ctx, input }) => { const { id, ...values } = input; const row = await updateSpeaker(id, values); await createAudit(`Updated speaker ${id}`, ctx.user.id); return row; }),
+    deleteSpeaker: adminOnly.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { await deleteSpeaker(input.id); await createAudit(`Deleted speaker ${input.id}`, ctx.user.id); return { success: true as const }; }),
+    communityLinks: adminOnly.query(() => listCommunityLinks()),
+    saveCommunityLink: adminOnly.input(z.object({ key: z.string().trim().min(1).max(80).regex(/^[a-z0-9-]+$/), label: z.string().trim().min(1).max(160), platform: z.string().trim().toLowerCase().min(1).max(40), url: z.string().url().max(700), description: z.string().optional(), isActive: z.boolean().default(true), displayOrder: z.number().int().default(0) })).mutation(async ({ ctx, input }) => { await upsertCommunityLink({ ...input, updatedBy: ctx.user.id }); await createAudit(`Saved community link ${input.key}`, ctx.user.id); return { success: true as const }; }),
+    deleteCommunityLink: adminOnly.input(z.object({ key: z.string().min(1).max(80) })).mutation(async ({ ctx, input }) => { await deleteCommunityLink(input.key); await createAudit(`Deleted community link ${input.key}`, ctx.user.id); return { success: true as const }; }),
+    siteSettings: adminOnly.query(() => getSiteSettings()),
+    saveSiteSettings: adminOnly.input(z.object({ featuredProgramId: z.number().int().positive().nullable().optional(), heroHeadline: z.string().max(240).optional(), heroSubheadline: z.string().optional(), aboutShortText: z.string().optional() })).mutation(async ({ ctx, input }) => { const row = await updateSiteSettings({ ...input, updatedBy: ctx.user.id }); await createAudit("Updated site settings", ctx.user.id); return row; }),
     stats: adminOnly.query(() => getStats()),
-    registrations: adminOnly.input(z.object({ status: z.enum(["PENDING", "ACCEPTED", "REJECTED"]).optional(), search: z.string().optional() })).query(({ input }) => listRegistrations(input)),
+    registrations: adminOnly.input(z.object({ status: z.enum(["PENDING", "ACCEPTED", "REJECTED"]).optional(), search: z.string().optional(), programId: z.number().int().positive().optional() })).query(({ input }) => listRegistrations(input)),
     registration: adminOnly.input(z.object({ id: z.number() })).query(({ input }) => getRegistration(input.id)),
     deleteRegistration: adminOnly.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const deleted = await deleteRegistration(input.id); if (!deleted) throw new Error("Registration not found."); await createAudit("Permanently deleted registration", ctx.user.id, undefined); return { success: true as const }; }),
     updateStatus: adminOnly.input(z.object({ id: z.number(), status: z.enum(["ACCEPTED", "REJECTED"]), reason: z.string().optional() })).mutation(async ({ ctx, input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const current = await getRegistration(input.id); if (!current) throw new Error("Registration not found"); if (current.status !== "PENDING") throw new Error("This request has already been reviewed."); await db.update(registrations).set({ status: input.status, reviewedAt: new Date(), reviewedBy: ctx.user.id, rejectionReason: input.reason ?? null }).where(and(eq(registrations.id, input.id), eq(registrations.status, "PENDING"))); await createAudit(`Registration ${input.status.toLowerCase()}`, ctx.user.id, input.id); if (input.status === "ACCEPTED") { await ensureDefaults(); const template = (await getConfig())?.template ?? ACCEPTANCE_DEFAULT; const rendered = htmlForTemplate(template, { firstName: current.firstName, lastName: current.lastName, fullName: `${current.firstName} ${current.lastName}`, school: current.school, classLevel: current.classLevel, country: current.country, email: current.email, whatsapp: `${current.countryCode} ${current.whatsappNumber}` }); await sendConfiguredEmail({ category: "ACCEPTANCE", recipient: current.email, subject: template.subject, body: rendered.body, html: rendered.html, adminId: ctx.user.id, registrationId: current.id, media: await getEmailMedia("id" in template ? template.id : undefined) }); } return { success: true }; }),
