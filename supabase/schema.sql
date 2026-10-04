@@ -1,6 +1,6 @@
 -- THE NEXT MIND — initial schema for Supabase (Postgres)
 --
--- Includes Phase 1 (programs/speakers/community/settings) and Phase 2 (per-program registration uniqueness). Requires Postgres 15+.
+-- Includes Phase 1 (programs/speakers/community/settings) and Phase 2 (per-program registration uniqueness) and Phase 4 (partnership/contact inboxes). Requires Postgres 15+.
 --
 -- Paste this whole file into the Supabase SQL Editor (Project > SQL Editor >
 -- New query) and run it once against a fresh project. It creates every
@@ -261,3 +261,36 @@ create trigger set_updated_at before update on "emailTemplates"
   for each row execute function set_updated_at();
 create trigger set_updated_at before update on "notificationPreferences"
   for each row execute function set_updated_at();
+
+-- Partnership requests & contact submissions (Phase 4)
+CREATE TYPE partnership_type AS ENUM ('SPEAKING','TRAINING','SPONSORSHIP','COMMUNITY_PARTNERSHIP','CONTENT_COLLABORATION','TECHNOLOGY_PARTNERSHIP','OTHER');
+CREATE TYPE partnership_status AS ENUM ('NEW','IN_REVIEW','ACCEPTED','DECLINED','ARCHIVED');
+CREATE TYPE contact_status AS ENUM ('NEW','READ','ARCHIVED');
+
+CREATE TABLE "partnershipRequests" (
+  "id" serial PRIMARY KEY,
+  "fullName" varchar(160) NOT NULL,
+  "email" varchar(320) NOT NULL,
+  "organization" varchar(240),
+  "phone" varchar(40),
+  "partnershipType" partnership_type NOT NULL,
+  "message" text NOT NULL,
+  "link" varchar(500),
+  "status" partnership_status NOT NULL DEFAULT 'NEW',
+  "adminNotes" text,
+  "createdAt" timestamp NOT NULL DEFAULT now(),
+  "updatedAt" timestamp NOT NULL DEFAULT now()
+);
+
+CREATE TABLE "contactSubmissions" (
+  "id" serial PRIMARY KEY,
+  "name" varchar(160) NOT NULL,
+  "email" varchar(320) NOT NULL,
+  "subject" varchar(240) NOT NULL,
+  "message" text NOT NULL,
+  "status" contact_status NOT NULL DEFAULT 'NEW',
+  "createdAt" timestamp NOT NULL DEFAULT now(),
+  "updatedAt" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX "partnershipRequests_status_createdAt_idx" ON "partnershipRequests" ("status","createdAt" DESC);
+CREATE INDEX "contactSubmissions_status_createdAt_idx" ON "contactSubmissions" ("status","createdAt" DESC);

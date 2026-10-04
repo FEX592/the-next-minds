@@ -6,13 +6,14 @@ import { COOKIE_NAME } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies.js";
 import { systemRouter } from "./_core/systemRouter.js";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc.js";
-import { createAudit, createEmailLog, createNotification, createProgram, createSpeaker, deleteCommunityLink, deleteRegistration, deleteSpeaker, ensureDefaults, getConfig, getDb, getEmailMedia, getProgramById, getProgramSpeakers, getProgramWebinarDetails, getPublicProgramBundle, getRegistration, getSiteSettings, getStats, listCommunityLinks, listPrograms, listRegistrations, listSpeakers, setProgramSpeakers, updateEmailLog, updateLocalAccount, updateProgram, updateSiteSettings, updateSpeaker, upsertCommunityLink, upsertProgramWebinarDetails } from "./db.js";
+import { createAudit, createContactSubmission, createEmailLog, createNotification, createPartnershipRequest, createProgram, createSpeaker, deleteCommunityLink, deleteContactSubmission, deletePartnershipRequest, getInboxCounts, listContactSubmissions, listPartnershipRequests, listRegistrationsForExport, recentSubmissionCount, updateContactSubmissionStatus, updatePartnershipRequest, deleteRegistration, deleteSpeaker, ensureDefaults, getConfig, getDb, getEmailMedia, getProgramById, getProgramSpeakers, getProgramWebinarDetails, getPublicProgramBundle, getRegistration, getSiteSettings, getStats, listCommunityLinks, listPrograms, listRegistrations, listSpeakers, setProgramSpeakers, updateEmailLog, updateLocalAccount, updateProgram, updateSiteSettings, updateSpeaker, upsertCommunityLink, upsertProgramWebinarDetails } from "./db.js";
 import { buildConfirmationEmail, REGISTRATION_CLOSED_MESSAGE, registrationState, resolveCommunity, toPublicProgram } from "./programs.js";
 import { DEFAULT_BODY, DEFAULT_HTML, DEFAULT_SUBJECT, renderTemplate, sendEmail, textToEmailHtml } from "./email.js";
 import { hashPassword, verifyPassword } from "./local-auth.js";
 import { ENV } from "./_core/env.js";
 import { adminInvites, emailConfig, emailLogs, emailMedia, emailTemplates, notificationPreferences, notifications, registrations, users } from "../drizzle/schema.js";
 import { storagePut } from "./storage.js";
+import { sniffImage } from "./image.js";
 
 const tailoredLevels: Record<string, string[]> = { Nigeria: ["JSS 1", "JSS 2", "JSS 3", "SS 1", "SS 2", "SS 3", "University / undergraduate", "Graduate / postgraduate"], Ghana: ["Basic 7", "Basic 8", "Basic 9", "SHS 1", "SHS 2", "SHS 3", "University / undergraduate", "Graduate / postgraduate"], "United Kingdom": ["Year 7", "Year 8", "Year 9", "Year 10", "Year 11", "Sixth Form", "University / undergraduate", "Graduate / postgraduate"], "United States": ["Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11", "Grade 12", "University / undergraduate", "Graduate / postgraduate"] };
 const genericLevels = ["Middle school", "High school", "University / undergraduate", "Graduate / postgraduate", "Apprentice / vocational", "Other"];
@@ -79,6 +80,12 @@ async function sendProgramConfirmation(program: NonNullable<Awaited<ReturnType<t
   return { sent: result.ok, community };
 }
 
+const PARTNERSHIP_TYPES = ["SPEAKING", "TRAINING", "SPONSORSHIP", "COMMUNITY_PARTNERSHIP", "CONTENT_COLLABORATION", "TECHNOLOGY_PARTNERSHIP", "OTHER"] as const;
+const PARTNERSHIP_LABEL: Record<(typeof PARTNERSHIP_TYPES)[number], string> = { SPEAKING: "Speaking", TRAINING: "Training", SPONSORSHIP: "Sponsorship", COMMUNITY_PARTNERSHIP: "Community partnership", CONTENT_COLLABORATION: "Content collaboration", TECHNOLOGY_PARTNERSHIP: "Technology partnership", OTHER: "Other" };
+const TOO_MANY = "You've sent several messages recently. Please try again a little later.";
+const optionalLink = z.string().trim().max(500).optional().transform(v => (v ? (/^https?:\/\//i.test(v) ? v : `https://${v}`) : undefined)).pipe(z.string().url().optional());
+const emptyToUndef = (max: number) => z.string().trim().max(max).optional().transform(v => v || undefined);
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -118,6 +125,23 @@ export const appRouter = router({
       const confirmation = await sendProgramConfirmation(program, { id: created.id, firstName: input.firstName, email }).catch(() => ({ sent: false, community: {} as { whatsapp?: string; telegram?: string } }));
       return { success: true as const, program: { title: program.title, slug: program.slug }, emailSent: confirmation.sent, community: confirmation.community };
     }),
+    partnership: publicProcedure.input(z.object({ fullName: z.string().trim().min(2).max(160), email: z.string().trim().email().max(320), organization: emptyToUndef(240), phone: emptyToUndef(40), partnershipType: z.enum(PARTNERSHIP_TYPES), message: z.string().trim().min(20, "Please tell us a little more (at least 20 characters).").max(5000), link: optionalLink, hp: z.string().optional() })).mutation(async ({ input }) => {
+      if (input.hp) return { success: true as const }; // honeypot: bots fill hidden fields
+      const email = input.email.toLowerCase();
+      if ((await recentSubmissionCount("partnership", email)) >= 3) throw new Error(TOO_MANY);
+      const { hp, ...values } = input;
+      try { await createPartnershipRequest({ ...values, email }); } catch { throw new Error("We couldn't send your request. Please try again."); }
+      await createNotification("New partnership request", `${input.fullName}${input.organization ? ` (${input.organization})` : ""} — ${PARTNERSHIP_LABEL[input.partnershipType]}`, undefined, "adminEvents").catch(() => {});
+      return { success: true as const };
+    }),
+    contact: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(160), email: z.string().trim().email().max(320), subject: z.string().trim().min(2).max(240), message: z.string().trim().min(10, "Please write a few more words.").max(5000), hp: z.string().optional() })).mutation(async ({ input }) => {
+      if (input.hp) return { success: true as const };
+      const email = input.email.toLowerCase();
+      if ((await recentSubmissionCount("contact", email)) >= 3) throw new Error(TOO_MANY);
+      try { await createContactSubmission({ name: input.name, email, subject: input.subject, message: input.message }); } catch { throw new Error("We couldn't send your message. Please try again."); }
+      await createNotification("New contact message", `${input.name}: ${input.subject}`, undefined, "adminEvents").catch(() => {});
+      return { success: true as const };
+    }),
     programs: publicProcedure.input(z.object({ type: programTypeInput.optional(), status: programStatusInput.optional() }).optional()).query(async ({ input }) => {
       const rows = await listPrograms({ publishedOnly: true, ...input });
       return rows.map(p => ({ ...toPublicProgram(p), registrationOpen: registrationState(p).open }));
@@ -143,6 +167,25 @@ export const appRouter = router({
     }),
   }),
   admin: router({
+    uploadImage: adminOnly.input(z.object({ folder: z.enum(["speakers", "programs", "seo"]), filename: z.string().min(1).max(240), dataBase64: z.string().max(4_400_000) })).mutation(async ({ ctx, input }) => {
+      const raw = Buffer.from(input.dataBase64.replace(/^data:[^;]+;base64,/, ""), "base64");
+      if (raw.length > 3 * 1024 * 1024) throw new Error("Image must be 3 MB or smaller.");
+      const type = sniffImage(raw);
+      if (!type) throw new Error("Upload a PNG, JPEG or WebP image.");
+      const base = input.filename.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").slice(0, 60) || "image";
+      const stored = await storagePut(`site-images/${input.folder}/${base}.${type.ext}`, raw, type.mime);
+      await createAudit(`Uploaded image ${stored.key}`, ctx.user.id);
+      return { url: stored.url };
+    }),
+
+    partnerships: adminOnly.input(z.object({ status: z.enum(["NEW", "IN_REVIEW", "ACCEPTED", "DECLINED", "ARCHIVED"]).optional(), search: z.string().max(120).optional() }).optional()).query(({ input }) => listPartnershipRequests(input ?? undefined)),
+    updatePartnership: adminOnly.input(z.object({ id: z.number().int().positive(), status: z.enum(["NEW", "IN_REVIEW", "ACCEPTED", "DECLINED", "ARCHIVED"]).optional(), adminNotes: z.string().max(5000).nullable().optional() })).mutation(async ({ ctx, input }) => { const { id, ...values } = input; const row = await updatePartnershipRequest(id, values); await createAudit(`Updated partnership request ${id}`, ctx.user.id); return row; }),
+    deletePartnership: adminOnly.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { await deletePartnershipRequest(input.id); await createAudit(`Deleted partnership request ${input.id}`, ctx.user.id); return { success: true as const }; }),
+    contacts: adminOnly.input(z.object({ status: z.enum(["NEW", "READ", "ARCHIVED"]).optional(), search: z.string().max(120).optional() }).optional()).query(({ input }) => listContactSubmissions(input ?? undefined)),
+    updateContact: adminOnly.input(z.object({ id: z.number().int().positive(), status: z.enum(["NEW", "READ", "ARCHIVED"]) })).mutation(({ input }) => updateContactSubmissionStatus(input.id, input.status)),
+    deleteContact: adminOnly.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { await deleteContactSubmission(input.id); await createAudit(`Deleted contact submission ${input.id}`, ctx.user.id); return { success: true as const }; }),
+    inboxCounts: adminOnly.query(() => getInboxCounts()),
+    exportRegistrations: adminOnly.input(z.object({ status: z.enum(["PENDING", "ACCEPTED", "REJECTED"]).optional(), search: z.string().max(120).optional(), programId: z.number().int().positive().optional() }).optional()).query(async ({ ctx, input }) => { const rows = await listRegistrationsForExport(input ?? undefined); await createAudit(`Exported ${rows.length} registrations`, ctx.user.id); return rows; }),
     programs: adminOnly.query(() => listPrograms()),
     program: adminOnly.input(z.object({ id: z.number().int().positive() })).query(async ({ input }) => { const program = await getProgramById(input.id); if (!program) throw new Error("Program not found."); return { program, webinar: await getProgramWebinarDetails(program.id), speakers: await getProgramSpeakers(program.id) }; }),
     createProgram: adminOnly.input(programCreateInput).mutation(async ({ ctx, input }) => { try { const row = await createProgram({ ...input, createdBy: ctx.user.id, updatedBy: ctx.user.id }); await createAudit(`Created program ${input.slug}`, ctx.user.id); return row; } catch (e: any) { if (isUniqueViolation(e)) throw new Error("That slug is already in use."); throw e; } }),
@@ -153,7 +196,7 @@ export const appRouter = router({
     setProgramSpeakers: adminOnly.input(z.object({ programId: z.number().int().positive(), speakers: z.array(z.object({ speakerId: z.number().int().positive(), topic: z.string().max(240).optional(), displayOrder: z.number().int().optional() })).max(30) })).mutation(async ({ ctx, input }) => { await setProgramSpeakers(input.programId, input.speakers); await createAudit(`Updated speakers for program ${input.programId}`, ctx.user.id); return { success: true as const }; }),
     speakers: adminOnly.query(() => listSpeakers()),
     createSpeaker: adminOnly.input(z.object({ name: speakerFields.name, photoUrl: speakerFields.photoUrl.optional(), role: speakerFields.role.optional(), bio: speakerFields.bio.optional(), socialLinks: speakerFields.socialLinks.optional(), website: speakerFields.website.optional() })).mutation(async ({ ctx, input }) => { const row = await createSpeaker(input); await createAudit(`Created speaker ${input.name}`, ctx.user.id); return row; }),
-    updateSpeaker: adminOnly.input(z.object({ id: z.number().int().positive(), name: speakerFields.name.optional(), photoUrl: speakerFields.photoUrl.optional(), role: speakerFields.role.optional(), bio: speakerFields.bio.optional(), socialLinks: speakerFields.socialLinks.optional(), website: speakerFields.website.optional() })).mutation(async ({ ctx, input }) => { const { id, ...values } = input; const row = await updateSpeaker(id, values); await createAudit(`Updated speaker ${id}`, ctx.user.id); return row; }),
+    updateSpeaker: adminOnly.input(z.object({ id: z.number().int().positive(), name: speakerFields.name.optional(), photoUrl: speakerFields.photoUrl.nullable().optional(), role: speakerFields.role.optional(), bio: speakerFields.bio.optional(), socialLinks: speakerFields.socialLinks.optional(), website: speakerFields.website.nullable().optional() })).mutation(async ({ ctx, input }) => { const { id, ...values } = input; const row = await updateSpeaker(id, values); await createAudit(`Updated speaker ${id}`, ctx.user.id); return row; }),
     deleteSpeaker: adminOnly.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { await deleteSpeaker(input.id); await createAudit(`Deleted speaker ${input.id}`, ctx.user.id); return { success: true as const }; }),
     communityLinks: adminOnly.query(() => listCommunityLinks()),
     saveCommunityLink: adminOnly.input(z.object({ key: z.string().trim().min(1).max(80).regex(/^[a-z0-9-]+$/), label: z.string().trim().min(1).max(160), platform: z.string().trim().toLowerCase().min(1).max(40), url: z.string().url().max(700), description: z.string().optional(), isActive: z.boolean().default(true), displayOrder: z.number().int().default(0) })).mutation(async ({ ctx, input }) => { await upsertCommunityLink({ ...input, updatedBy: ctx.user.id }); await createAudit(`Saved community link ${input.key}`, ctx.user.id); return { success: true as const }; }),

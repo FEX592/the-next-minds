@@ -2,6 +2,7 @@ import { trpc } from "@/lib/trpc";
 import { ArrowDown, ArrowUp, ExternalLink, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import ImageField from "./ImageField";
 import { Area, Btn, errMsg, Loading, Pick, Section, slugify, Text, toLocalInput, Toggle } from "./ui";
 
 const TYPES: [string, string][] = [["WEBINAR", "Webinar"], ["WORKSHOP", "Workshop"], ["COURSE", "Course"], ["CHALLENGE", "Challenge"], ["TRAINING", "Training"], ["COMMUNITY_INITIATIVE", "Community initiative"], ["OTHER", "Other"]];
@@ -123,7 +124,7 @@ function ProgramEditor({ id, onBack }: { id: number | "new"; onBack: () => void 
         <Pick label="Status" value={f.status} onChange={v => set("status", v)} options={STATUSES} />
         <div className="sm:col-span-2"><Area label="Short description" rows={2} value={f.shortDescription} onChange={v => set("shortDescription", v)} /></div>
         <div className="sm:col-span-2"><Area label="Full description" rows={6} value={f.fullDescription} onChange={v => set("fullDescription", v)} hint="One paragraph per line break." /></div>
-        <div className="sm:col-span-2"><Text label="Cover image URL" type="url" value={f.coverImageUrl} onChange={v => set("coverImageUrl", v)} /></div>
+        <div className="sm:col-span-2"><ImageField label="Cover image" folder="programs" maxDim={1600} value={f.coverImageUrl} onChange={v => set("coverImageUrl", v)} hint="Wide images (16:9) look best. Large images are resized automatically." /></div>
       </Section>
 
       <Section title="Schedule">
@@ -187,7 +188,7 @@ function ProgramEditor({ id, onBack }: { id: number | "new"; onBack: () => void 
       <Section title="SEO">
         <div className="sm:col-span-2"><Text label="SEO title" value={f.seoTitle} onChange={v => set("seoTitle", v)} /></div>
         <div className="sm:col-span-2"><Area label="Meta description" rows={2} value={f.seoDescription} onChange={v => set("seoDescription", v)} /></div>
-        <div className="sm:col-span-2"><Text label="Open Graph image URL" type="url" value={f.seoImageUrl} onChange={v => set("seoImageUrl", v)} hint="Falls back to the cover image." /></div>
+        <div className="sm:col-span-2"><ImageField label="Share image (Open Graph)" folder="seo" maxDim={1200} forceWebSafe value={f.seoImageUrl} onChange={v => set("seoImageUrl", v)} hint="Shown when the link is shared (WhatsApp, X, LinkedIn). 1200×630 is ideal. Falls back to the cover image." /></div>
       </Section>
 
       <div className="flex justify-end gap-3 pb-8"><Btn variant="ghost" onClick={onBack}>Close</Btn><Btn busy={busy} onClick={save}>Save</Btn></div>

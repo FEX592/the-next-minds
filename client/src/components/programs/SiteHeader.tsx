@@ -15,11 +15,13 @@ export function PageShell({ children }: { children: React.ReactNode }) {
           </Link>
           <nav className="flex items-center gap-5 text-sm text-slate-300">
             <Link href="/programs" className="hover:text-white">Programs</Link>
+            <Link href="/partner" className="hidden hover:text-white sm:inline">Partner</Link>
+            <Link href="/contact" className="hidden hover:text-white sm:inline">Contact</Link>
             <Link href="/" className="rounded-full bg-yellow-300 px-4 py-2 font-semibold text-slate-950 hover:bg-yellow-200">Join</Link>
           </nav>
         </header>
         {children}
-        <footer className="mt-16 border-t border-white/10 pt-6 text-xs text-slate-500">THE NEXT MIND · JAM TO THE WORLD · Coach Jam Digital Solutions</footer>
+        <footer className="mt-16 flex flex-col gap-3 border-t border-white/10 pt-6 text-xs text-slate-500 sm:flex-row sm:justify-between"><span>THE NEXT MIND · JAM TO THE WORLD · Coach Jam Digital Solutions</span><span className="flex gap-4"><Link href="/programs" className="hover:text-white">Programs</Link><Link href="/partner" className="hover:text-white">Partner with us</Link><Link href="/contact" className="hover:text-white">Contact</Link></span></footer>
       </div>
     </main>
   );

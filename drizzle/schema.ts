@@ -7,6 +7,9 @@ export const emailMediaPlacementEnum = pgEnum("email_media_placement", ["INLINE"
 export const emailLogStatusEnum = pgEnum("email_log_status", ["PENDING", "SENDING", "SENT", "FAILED"]);
 export const programTypeEnum = pgEnum("program_type", ["WEBINAR", "WORKSHOP", "COURSE", "CHALLENGE", "TRAINING", "COMMUNITY_INITIATIVE", "OTHER"]);
 export const programStatusEnum = pgEnum("program_status", ["UPCOMING", "ONGOING", "COMPLETED"]);
+export const partnershipTypeEnum = pgEnum("partnership_type", ["SPEAKING", "TRAINING", "SPONSORSHIP", "COMMUNITY_PARTNERSHIP", "CONTENT_COLLABORATION", "TECHNOLOGY_PARTNERSHIP", "OTHER"]);
+export const partnershipStatusEnum = pgEnum("partnership_status", ["NEW", "IN_REVIEW", "ACCEPTED", "DECLINED", "ARCHIVED"]);
+export const contactStatusEnum = pgEnum("contact_status", ["NEW", "READ", "ARCHIVED"]);
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(), openId: varchar("openId", { length: 64 }).notNull().unique(), name: text("name"), email: varchar("email", { length: 320 }), passwordHash: text("passwordHash"), loginMethod: varchar("loginMethod", { length: 64 }).default("local"), role: roleEnum("role").default("user").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().notNull(), lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -114,6 +117,21 @@ export const siteSettings = pgTable("siteSettings", {
   updatedBy: integer("updatedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
+
+// --- Partnership requests & contact submissions (PRD Phase 4) ---
+export const partnershipRequests = pgTable("partnershipRequests", {
+  id: serial("id").primaryKey(), fullName: varchar("fullName", { length: 160 }).notNull(), email: varchar("email", { length: 320 }).notNull(), organization: varchar("organization", { length: 240 }), phone: varchar("phone", { length: 40 }),
+  partnershipType: partnershipTypeEnum("partnershipType").notNull(), message: text("message").notNull(), link: varchar("link", { length: 500 }),
+  status: partnershipStatusEnum("status").notNull().default("NEW"), adminNotes: text("adminNotes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export const contactSubmissions = pgTable("contactSubmissions", {
+  id: serial("id").primaryKey(), name: varchar("name", { length: 160 }).notNull(), email: varchar("email", { length: 320 }).notNull(), subject: varchar("subject", { length: 240 }).notNull(), message: text("message").notNull(),
+  status: contactStatusEnum("status").notNull().default("NEW"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type PartnershipRequest = typeof partnershipRequests.$inferSelect; export type InsertPartnershipRequest = typeof partnershipRequests.$inferInsert;
+export type ContactSubmission = typeof contactSubmissions.$inferSelect; export type InsertContactSubmission = typeof contactSubmissions.$inferInsert;
 
 export type User = typeof users.$inferSelect; export type InsertUser = typeof users.$inferInsert; export type Registration = typeof registrations.$inferSelect; export type InsertRegistration = typeof registrations.$inferInsert;
 export type Program = typeof programs.$inferSelect; export type InsertProgram = typeof programs.$inferInsert;

@@ -2,6 +2,7 @@ import { trpc } from "@/lib/trpc";
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import ImageField from "./ImageField";
 import { Area, Btn, errMsg, Loading, Text } from "./ui";
 
 const blank = { name: "", role: "", photoUrl: "", bio: "", website: "", socialLinks: "" };
@@ -24,9 +25,9 @@ export default function SpeakersAdmin() {
   };
   const save = () => {
     const opt = (v: string) => v.trim() || undefined;
-    // Empty optional fields are omitted on create; on update an empty string clears the value server-side only for text fields.
+    // Create omits empty optionals; update sends empty strings / null so values can be cleared.
     const body = { name: f.name.trim(), role: opt(f.role), photoUrl: opt(f.photoUrl), bio: opt(f.bio), website: opt(f.website), socialLinks: opt(f.socialLinks) };
-    if (editing === "new") create.mutate(body); else if (editing) update.mutate({ id: editing, ...body, role: f.role.trim(), bio: f.bio.trim(), socialLinks: f.socialLinks.trim() });
+    if (editing === "new") create.mutate(body); else if (editing) update.mutate({ id: editing, name: body.name, role: f.role.trim(), bio: f.bio.trim(), socialLinks: f.socialLinks.trim(), photoUrl: f.photoUrl.trim() || null, website: f.website.trim() || null });
   };
 
   return (
@@ -41,7 +42,7 @@ export default function SpeakersAdmin() {
           <div className="grid gap-4 sm:grid-cols-2">
             <Text label="Name" required value={f.name} onChange={v => set("name", v)} />
             <Text label="Role / title" value={f.role} onChange={v => set("role", v)} placeholder="The Human" />
-            <Text label="Photo URL" type="url" value={f.photoUrl} onChange={v => set("photoUrl", v)} />
+            <div className="sm:col-span-2"><ImageField label="Photo" folder="speakers" shape="round" maxDim={800} value={f.photoUrl} onChange={v => set("photoUrl", v)} hint="Square photos work best. Large images are resized automatically." /></div>
             <Text label="Website" type="url" value={f.website} onChange={v => set("website", v)} />
             <div className="sm:col-span-2"><Area label="Short bio" rows={3} value={f.bio} onChange={v => set("bio", v)} /></div>
             <div className="sm:col-span-2"><Area label="Social links" rows={2} value={f.socialLinks} onChange={v => set("socialLinks", v)} hint="One URL per line." /></div>
