@@ -27,7 +27,8 @@ export default function Programs() {
     <PageShell>
       <section className="py-10 sm:py-14">
         <h1 className="font-display text-4xl font-semibold tracking-tight text-white sm:text-5xl">Programs</h1>
-        <p className="mt-3 max-w-xl text-slate-300">Webinars, workshops and challenges for students and young creatives.</p>
+        <p className="mt-3 max-w-xl text-slate-300">Webinars, workshops and challenges for students and young creatives. Select one or more programs to register.</p>
+        {!query.isLoading && !query.error && all.every(p => !p.registrationOpen) && <p role="status" className="mt-5 max-w-xl rounded-xl border border-yellow-300/25 bg-yellow-300/5 px-4 py-3 text-sm text-yellow-100">Registration is currently unavailable — no programs are open right now.</p>}
         {featured && featured.status !== "COMPLETED" && <div className="mt-8"><div className="mb-3 text-xs font-semibold uppercase tracking-[.18em] text-yellow-200">Featured</div><ProgramCard program={featured} /></div>}
         <div className="mt-8 flex flex-wrap items-center gap-2" role="tablist">
           {TABS.map(t => (
@@ -44,7 +45,7 @@ export default function Programs() {
         </div>
         <div className="mt-8">
           {query.isLoading ? <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-yellow-200" /></div>
-            : query.error ? <p className="py-16 text-center text-slate-400">Couldn't load programs. Please refresh.</p>
+            : query.error ? <p className="py-16 text-center text-slate-400">{/out of date/.test(query.error.message) ? query.error.message : "Couldn't load programs. Please refresh."}</p>
             : visible.length === 0 ? <p className="py-16 text-center text-slate-400">Nothing here yet — check back soon.</p>
             : <div className="grid gap-5 sm:grid-cols-2">{visible.map(p => <ProgramCard key={p.id} program={p} />)}</div>}
         </div>

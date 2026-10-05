@@ -130,7 +130,7 @@ CREATE TABLE "siteSettings" (
 
 create table "registrations" (
   "id" serial primary key,
-  "programId" integer references "programs"("id"),
+  "programId" integer not null references "programs"("id"),
   "firstName" varchar(120) not null,
   "lastName" varchar(120) not null,
   "country" varchar(80) not null,
@@ -294,3 +294,13 @@ CREATE TABLE "contactSubmissions" (
 );
 CREATE INDEX "partnershipRequests_status_createdAt_idx" ON "partnershipRequests" ("status","createdAt" DESC);
 CREATE INDEX "contactSubmissions_status_createdAt_idx" ON "contactSubmissions" ("status","createdAt" DESC);
+
+-- RLS on, no policies (matches the live project): the app connects directly to Postgres; the public API gets no table access.
+ALTER TABLE "programs" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "programWebinarDetails" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "speakers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "programSpeakers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "communityLinks" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "siteSettings" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "partnershipRequests" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "contactSubmissions" ENABLE ROW LEVEL SECURITY;

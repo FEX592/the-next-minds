@@ -2,7 +2,7 @@ import { trpc } from "@/lib/trpc";
 import { usePageMeta } from "@/lib/seo";
 import { CalendarDays, Clock, ExternalLink, Loader2, MapPin } from "lucide-react";
 import { Link, useParams } from "wouter";
-import { ProgramRegistration } from "@/components/programs/ProgramRegistration";
+import { SelectProgramButton } from "@/components/programs/SelectProgramButton";
 import { PageShell } from "@/components/programs/SiteHeader";
 import { formatDuration, formatWhen, lines, STATUS_LABEL, STATUS_STYLE, TYPE_LABEL } from "@/components/programs/format";
 import NotFound from "./NotFound";
@@ -40,7 +40,7 @@ export default function ProgramDetail() {
           {p.locationOrPlatform && <li className="flex items-center gap-2"><MapPin className="h-4 w-4 text-yellow-200" />{p.locationOrPlatform}</li>}
         </ul>
         <div className="mt-6 flex flex-wrap gap-3">
-          {p.registrationOpen && <a href="#register" className="rounded-xl bg-yellow-300 px-5 py-3 font-semibold text-slate-950 hover:bg-yellow-200">{p.registrationCtaLabel || "Register now"}</a>}
+          {p.registrationOpen && <SelectProgramButton program={p} />}
           {webinar?.joinLink && <a href={webinar.joinLink} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950">Join live <ExternalLink className="h-4 w-4" /></a>}
           {webinar?.recordingUrl && <a href={webinar.recordingUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-xl border border-white/20 px-5 py-3 font-semibold text-white hover:border-white/50">Watch recording <ExternalLink className="h-4 w-4" /></a>}
         </div>
@@ -83,7 +83,7 @@ export default function ProgramDetail() {
         )}
 
         <section id="register" className="mt-14 scroll-mt-6 max-w-2xl">
-          {p.registrationOpen ? <ProgramRegistration programId={p.id} programTitle={p.title} ctaLabel={p.registrationCtaLabel} />
+          {p.registrationOpen ? <div className="glass rounded-3xl p-6"><h3 className="font-display text-xl font-semibold text-white">Ready to join?</h3><p className="mt-2 text-sm text-slate-400">Select this program, add any others you like, then press Register.</p><div className="mt-4"><SelectProgramButton program={p} /></div></div>
             : <div className="glass rounded-3xl p-6 text-slate-300">{p.registrationClosedMessage}
                 {(community.whatsapp || community.telegram) && <div className="mt-4 flex flex-wrap gap-3">{community.whatsapp && <a className="rounded-xl border border-white/15 px-4 py-2 text-white hover:border-yellow-300/50" href={community.whatsapp} target="_blank" rel="noreferrer">WhatsApp Community</a>}{community.telegram && <a className="rounded-xl border border-white/15 px-4 py-2 text-white hover:border-yellow-300/50" href={community.telegram} target="_blank" rel="noreferrer">Telegram Community</a>}</div>}
               </div>}

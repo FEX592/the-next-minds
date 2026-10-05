@@ -30,3 +30,7 @@ CREATE TABLE "contactSubmissions" (
 );
 CREATE INDEX "partnershipRequests_status_createdAt_idx" ON "partnershipRequests" ("status","createdAt" DESC);
 CREATE INDEX "contactSubmissions_status_createdAt_idx" ON "contactSubmissions" ("status","createdAt" DESC);
+
+-- RLS on, no policies (matches the live project): the app connects directly to Postgres; the public API gets no table access.
+ALTER TABLE "partnershipRequests" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "contactSubmissions" ENABLE ROW LEVEL SECURITY;

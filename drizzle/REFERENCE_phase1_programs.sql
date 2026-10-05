@@ -100,3 +100,11 @@ ALTER TABLE "registrations" ADD COLUMN "programId" integer;
 -- the current single-program flow) keep working untouched with programId = NULL.
 -- A real REFERENCES "programs"("id") constraint can be added once Phase 2 wires
 -- the registration form to a real programId for every new submission.
+
+-- RLS on, no policies (matches the live project): the app connects directly to Postgres; the public API gets no table access.
+ALTER TABLE "programs" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "programWebinarDetails" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "speakers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "programSpeakers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "communityLinks" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "siteSettings" ENABLE ROW LEVEL SECURITY;

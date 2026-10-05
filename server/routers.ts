@@ -7,7 +7,7 @@ import { getSessionCookieOptions } from "./_core/cookies.js";
 import { systemRouter } from "./_core/systemRouter.js";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc.js";
 import { createAudit, createContactSubmission, createEmailLog, createNotification, createPartnershipRequest, createProgram, createSpeaker, deleteCommunityLink, deleteContactSubmission, deletePartnershipRequest, getInboxCounts, listContactSubmissions, listPartnershipRequests, listRegistrationsForExport, recentSubmissionCount, updateContactSubmissionStatus, updatePartnershipRequest, deleteRegistration, deleteSpeaker, ensureDefaults, getConfig, getDb, getEmailMedia, getProgramById, getProgramSpeakers, getProgramWebinarDetails, getPublicProgramBundle, getRegistration, getSiteSettings, getStats, listCommunityLinks, listPrograms, listRegistrations, listSpeakers, setProgramSpeakers, updateEmailLog, updateLocalAccount, updateProgram, updateSiteSettings, updateSpeaker, upsertCommunityLink, upsertProgramWebinarDetails } from "./db.js";
-import { buildConfirmationEmail, REGISTRATION_CLOSED_MESSAGE, registrationState, resolveCommunity, toPublicProgram } from "./programs.js";
+import { buildConfirmationEmail, REGISTRATION_CLOSED_MESSAGE, registrationState, resolveCommunity, resolveCommunityMany, toPublicProgram } from "./programs.js";
 import { DEFAULT_BODY, DEFAULT_HTML, DEFAULT_SUBJECT, renderTemplate, sendEmail, textToEmailHtml } from "./email.js";
 import { hashPassword, verifyPassword } from "./local-auth.js";
 import { ENV } from "./_core/env.js";
@@ -72,11 +72,12 @@ const programCreateInput = z.object(programFields).partial().required({ slug: tr
 const programUpdateInput = z.object(programFields).partial().extend({ id: z.number().int().positive() });
 const speakerFields = { name: z.string().trim().min(1).max(160), photoUrl: z.string().url().max(700), role: z.string().max(160), bio: z.string(), socialLinks: z.string(), website: z.string().url().max(500) };
 
-async function sendProgramConfirmation(program: NonNullable<Awaited<ReturnType<typeof getProgramById>>>, reg: { id: number; firstName: string; email: string }) {
-  const [webinar, links] = await Promise.all([getProgramWebinarDetails(program.id), listCommunityLinks({ activeOnly: true })]);
-  const community = resolveCommunity(program, links);
-  const { subject, body } = buildConfirmationEmail({ firstName: reg.firstName, program, joinLink: webinar?.joinLink, ...community });
-  const result = await sendConfiguredEmail({ category: "CONFIRMATION", recipient: reg.email, subject, body, html: DEFAULT_HTML(textToEmailHtml(body)), registrationId: reg.id });
+type ProgramRow = NonNullable<Awaited<ReturnType<typeof getProgramById>>>;
+async function sendProgramConfirmation(programs: ProgramRow[], person: { firstName: string; email: string }, registrationId: number) {
+  const [webinars, links] = await Promise.all([Promise.all(programs.map(p => getProgramWebinarDetails(p.id))), listCommunityLinks({ activeOnly: true })]);
+  const community = resolveCommunityMany(programs, links);
+  const { subject, body } = buildConfirmationEmail({ firstName: person.firstName, programs: programs.map((p, i) => ({ ...p, joinLink: webinars[i]?.joinLink })), ...community });
+  const result = await sendConfiguredEmail({ category: "CONFIRMATION", recipient: person.email, subject, body, html: DEFAULT_HTML(textToEmailHtml(body)), registrationId });
   return { sent: result.ok, community };
 }
 
@@ -97,33 +98,34 @@ export const appRouter = router({
   public: router({
     countries: publicProcedure.query(() => countries),
     levels: publicProcedure.input(z.object({ country: z.string() })).query(({ input }) => levels[input.country] ?? []),
-    register: publicProcedure.input(z.object({ programId: z.number().int().positive().optional(), firstName: z.string().trim().min(1).max(120), lastName: z.string().trim().min(1).max(120), country: z.string(), countryCode: z.string(), whatsappNumber: z.string().min(5).max(40), classLevel: z.string(), school: z.string().trim().min(2).max(240), email: z.string().trim().email().max(320) })).mutation(async ({ input }) => {
+    register: publicProcedure.input(z.object({ programIds: z.array(z.number().int().positive()).min(1, "Select at least one program.").max(10), firstName: z.string().trim().min(1).max(120), lastName: z.string().trim().min(1).max(120), country: z.string(), countryCode: z.string(), whatsappNumber: z.string().min(5).max(40), classLevel: z.string(), school: z.string().trim().min(2).max(240), email: z.string().trim().email().max(320) })).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new Error("Registration service is unavailable");
       const validCountry = countries.find(c => c.name === input.country && c.code === input.countryCode);
       if (!validCountry || !(levels[input.country] ?? []).includes(input.classLevel)) throw new Error("Please check your country and class selection.");
-      const { programId, ...person } = input;
-      const program = programId ? await getProgramById(programId, { publishedOnly: true }) : null;
-      if (programId) {
-        if (!program) throw new Error(REGISTRATION_CLOSED_MESSAGE.unavailable);
-        const gate = registrationState(program);
-        if (!gate.open) throw new Error(REGISTRATION_CLOSED_MESSAGE[gate.reason]);
-      }
+      const { programIds, ...person } = input;
       const digits = input.whatsappNumber.replace(/\D/g, "");
       const normalized = input.countryCode + digits.replace(/^0+/, "");
       const email = input.email.toLowerCase();
-      let created: { id: number } | undefined;
-      try {
-        // Program registrations are confirmed immediately (PRD flow); the legacy no-program flow keeps manual review.
-        const rows = await db.insert(registrations).values({ ...person, email, programId: program?.id ?? null, whatsappNumber: digits, normalizedWhatsapp: normalized, status: program ? "ACCEPTED" : "PENDING", reviewedAt: program ? new Date() : null }).returning({ id: registrations.id });
-        created = rows[0];
-      } catch (error: any) {
-        if (isUniqueViolation(error)) throw new Error(program ? "You are already registered for this program." : "A registration with these contact details already exists.");
-        throw new Error("We couldn't save your registration. Please try again.");
+      const registered: { id: number; program: ProgramRow }[] = [];
+      const skipped: { title: string; reason: string }[] = [];
+      // One registration per selected program. Each insert is independent so an already-registered or just-closed program doesn't block the others.
+      for (const programId of Array.from(new Set(programIds))) {
+        const program = await getProgramById(programId, { publishedOnly: true });
+        if (!program) { skipped.push({ title: "A selected program", reason: REGISTRATION_CLOSED_MESSAGE.unavailable }); continue; }
+        const gate = registrationState(program);
+        if (!gate.open) { skipped.push({ title: program.title, reason: REGISTRATION_CLOSED_MESSAGE[gate.reason] }); continue; }
+        try {
+          const rows = await db.insert(registrations).values({ ...person, email, programId: program.id, whatsappNumber: digits, normalizedWhatsapp: normalized, status: "ACCEPTED", reviewedAt: new Date() }).returning({ id: registrations.id });
+          registered.push({ id: rows[0].id, program });
+        } catch (error: any) {
+          if (isUniqueViolation(error)) skipped.push({ title: program.title, reason: "You're already registered for this program." });
+          else throw new Error("We couldn't save your registration. Please try again.");
+        }
       }
-      await createNotification("New registration received", `New registration from ${input.firstName} ${input.lastName}${program ? ` for ${program.title}` : ""}.`, created?.id, "newRegistration").catch(() => {});
-      if (!program || !created) return { success: true as const, program: null, emailSent: false, community: {} as { whatsapp?: string; telegram?: string } };
-      const confirmation = await sendProgramConfirmation(program, { id: created.id, firstName: input.firstName, email }).catch(() => ({ sent: false, community: {} as { whatsapp?: string; telegram?: string } }));
-      return { success: true as const, program: { title: program.title, slug: program.slug }, emailSent: confirmation.sent, community: confirmation.community };
+      if (!registered.length) throw new Error(skipped.length === 1 ? skipped[0].reason : `We couldn't register you: ${skipped.map(x => `${x.title} — ${x.reason}`).join(" ")}`);
+      await createNotification("New registration received", `New registration from ${input.firstName} ${input.lastName} for ${registered.map(r => r.program.title).join(", ")}.`, registered[0].id, "newRegistration").catch(() => {});
+      const confirmation = await sendProgramConfirmation(registered.map(r => r.program), { firstName: input.firstName, email }, registered[0].id).catch(() => ({ sent: false, community: { whatsapp: [] as string[], telegram: [] as string[] } }));
+      return { success: true as const, registered: registered.map(r => ({ title: r.program.title, slug: r.program.slug })), skipped, emailSent: confirmation.sent, community: confirmation.community };
     }),
     partnership: publicProcedure.input(z.object({ fullName: z.string().trim().min(2).max(160), email: z.string().trim().email().max(320), organization: emptyToUndef(240), phone: emptyToUndef(40), partnershipType: z.enum(PARTNERSHIP_TYPES), message: z.string().trim().min(20, "Please tell us a little more (at least 20 characters).").max(5000), link: optionalLink, hp: z.string().optional() })).mutation(async ({ input }) => {
       if (input.hp) return { success: true as const }; // honeypot: bots fill hidden fields
