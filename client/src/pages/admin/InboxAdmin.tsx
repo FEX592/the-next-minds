@@ -3,6 +3,8 @@ import { Mail } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Btn, errMsg, inputCls, Loading } from "./ui";
+import { HostMailComposer } from "@/components/mail-composer/HostMailComposer";
+import "@/components/mail-composer/mail-composer.css";
 
 const P_STATUS: [string, string][] = [["NEW", "New"], ["IN_REVIEW", "In review"], ["ACCEPTED", "Accepted"], ["DECLINED", "Declined"], ["ARCHIVED", "Archived"]];
 const C_STATUS: [string, string][] = [["NEW", "New"], ["READ", "Read"], ["ARCHIVED", "Archived"]];
@@ -42,6 +44,7 @@ function Partnerships() {
   const update = trpc.admin.updatePartnership.useMutation({ onSuccess: refresh, onError: e => toast.error(errMsg(e)) });
   const remove = trpc.admin.deletePartnership.useMutation({ onSuccess: () => { refresh(); toast.success("Deleted."); }, onError: e => toast.error(errMsg(e)) });
   const [notes, setNotes] = useState<Record<number, string>>({});
+  const [reply, setReply] = useState<{ email: string; subject: string } | null>(null);
   return (
     <>
       <Filters status={status} setStatus={setStatus} search={search} setSearch={setSearch} options={P_STATUS} />
@@ -54,7 +57,7 @@ function Partnerships() {
             </div>
             <p className="mt-4 whitespace-pre-wrap break-words text-sm leading-6 text-slate-300">{r.message}</p>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
-              <a className="text-yellow-200 hover:underline" href={`mailto:${r.email}?subject=${encodeURIComponent("Re: NEXT MIND partnership")}`}>{r.email}</a>
+              <button type="button" className="text-left text-yellow-200 hover:underline" onClick={() => setReply({ email: r.email, subject: "Re: NEXT MIND partnership" })}>{r.email}</button>
               {r.phone && <span className="text-slate-400">{r.phone}</span>}
               {r.link && <a className="break-all text-yellow-200 hover:underline" href={r.link} target="_blank" rel="noreferrer noopener">{r.link}</a>}
             </div>
@@ -66,6 +69,7 @@ function Partnerships() {
           </div>
         ))}
       </div>
+      {reply && <ReplyComposer email={reply.email} subject={reply.subject} onClose={() => setReply(null)} />}
     </>
   );
 }
@@ -77,6 +81,7 @@ function Contacts() {
   const refresh = () => { utils.admin.contacts.invalidate(); utils.admin.inboxCounts.invalidate(); };
   const update = trpc.admin.updateContact.useMutation({ onSuccess: refresh, onError: e => toast.error(errMsg(e)) });
   const remove = trpc.admin.deleteContact.useMutation({ onSuccess: () => { refresh(); toast.success("Deleted."); }, onError: e => toast.error(errMsg(e)) });
+  const [reply, setReply] = useState<{ email: string; subject: string } | null>(null);
   return (
     <>
       <Filters status={status} setStatus={setStatus} search={search} setSearch={setSearch} options={C_STATUS} />
@@ -86,7 +91,7 @@ function Contacts() {
             <div className="flex flex-col justify-between gap-2 sm:flex-row"><div className="min-w-0"><div className="font-semibold text-white">{m.subject}</div><div className="mt-1 text-xs text-slate-500">{m.name} · {m.email} · {new Date(m.createdAt).toLocaleString()}</div></div>{m.status === "NEW" && <span className="h-fit w-fit rounded-full bg-yellow-300/15 px-2.5 py-1 text-[11px] font-semibold uppercase text-yellow-100">New</span>}</div>
             <p className="mt-4 whitespace-pre-wrap break-words text-sm leading-6 text-slate-300">{m.message}</p>
             <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <a href={`mailto:${m.email}?subject=${encodeURIComponent("Re: " + m.subject)}`} onClick={() => m.status === "NEW" && update.mutate({ id: m.id, status: "READ" })} className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/5"><Mail className="h-4 w-4" /> Reply</a>
+              <button type="button" onClick={() => { if (m.status === "NEW") update.mutate({ id: m.id, status: "READ" }); setReply({ email: m.email, subject: "Re: " + m.subject }); }} className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/5"><Mail className="h-4 w-4" /> Reply</button>
               {m.status !== "READ" && <Btn variant="ghost" onClick={() => update.mutate({ id: m.id, status: "READ" })}>Mark read</Btn>}
               {m.status !== "ARCHIVED" ? <Btn variant="ghost" onClick={() => update.mutate({ id: m.id, status: "ARCHIVED" })}>Archive</Btn> : <Btn variant="ghost" onClick={() => update.mutate({ id: m.id, status: "READ" })}>Restore</Btn>}
               <Btn variant="danger" onClick={() => confirm("Delete this message permanently?") && remove.mutate({ id: m.id })}>Delete</Btn>
@@ -94,6 +99,11 @@ function Contacts() {
           </div>
         ))}
       </div>
+      {reply && <ReplyComposer email={reply.email} subject={reply.subject} onClose={() => setReply(null)} />}
     </>
   );
+}
+
+function ReplyComposer({ email, subject, onClose }: { email: string; subject: string; onClose: () => void }) {
+  return <div className="fixed inset-0 z-50 overflow-auto bg-black/60 p-4 backdrop-blur-sm sm:p-8"><div className="mx-auto max-w-5xl"><HostMailComposer initialDraft={{ to: [email], subject, content: "<p style=\"margin:0;\"></p>" }} onClose={onClose} /></div></div>;
 }

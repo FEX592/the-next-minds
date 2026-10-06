@@ -3,7 +3,7 @@ import { storageGetSignedUrl } from "./storage.js";
 import { ENV } from "./_core/env.js";
 
 type Media = { fileUrl: string; filename: string; mimeType: string; contentId?: string | null; placement: "INLINE" | "ATTACHMENT" };
-type SendInput = { from: string; replyTo?: string | null; to: string[]; subject: string; html: string; text?: string; media?: Media[] };
+type SendInput = { from: string; replyTo?: string | null; to: string[]; cc?: string[]; bcc?: string[]; subject: string; html: string; text?: string; media?: Media[] };
 export type SendResult = { ok: true; id: string } | { ok: false; error: string };
 
 function parseSender(from: string): { name?: string; email: string } {
@@ -34,6 +34,8 @@ export async function sendEmail(input: SendInput): Promise<SendResult> {
       body: JSON.stringify({
         sender,
         to: input.to.map(email => ({ email })),
+        ...(input.cc?.length ? { cc: input.cc.map(email => ({ email })) } : {}),
+        ...(input.bcc?.length ? { bcc: input.bcc.map(email => ({ email })) } : {}),
         replyTo: input.replyTo ? { email: input.replyTo } : undefined,
         subject: input.subject,
         htmlContent: input.html,

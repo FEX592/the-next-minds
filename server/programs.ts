@@ -65,7 +65,7 @@ export function resolveCommunityMany(
     if (c.whatsapp) whatsapp.add(c.whatsapp);
     if (c.telegram) telegram.add(c.telegram);
   }
-  return { whatsapp: [...whatsapp], telegram: [...telegram] };
+  return { whatsapp: Array.from(whatsapp), telegram: Array.from(telegram) };
 }
 
 export type ConfirmationProgram = { title: string; startAt: Date | null; durationMinutes: number | null; locationOrPlatform: string | null; joinLink?: string | null };
