@@ -14,11 +14,13 @@ export default function Home() {
   const links = trpc.public.communityLinks.useQuery().data ?? [];
   const [shareLabel, setShareLabel] = useState("Share THE NEXT MIND");
 
-  const showcase = useMemo(() => {
+  const fallbackFeatured = useMemo(() => {
     const time = (d: Date | null) => (d ? new Date(d).getTime() : Number.MAX_SAFE_INTEGER);
-    return (programs.data ?? []).filter(p => p.status !== "COMPLETED").sort((a, b) => time(a.startAt) - time(b.startAt)).slice(0, 6);
+    const upcoming = (programs.data ?? []).filter(p => p.status !== "COMPLETED").sort((a, b) => time(a.startAt) - time(b.startAt));
+    return upcoming[0] ?? null;
   }, [programs.data]);
-  const anyOpen = showcase.some(p => p.registrationOpen);
+  const featured = settings?.featuredProgram ?? fallbackFeatured;
+  const anyOpen = (programs.data ?? []).some(p => p.registrationOpen);
 
   return (
     <PageShell>
@@ -36,14 +38,13 @@ export default function Home() {
 
       <section id="programs" className="py-10">
         <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
-          <div>
-            <h2 className="font-display text-3xl font-semibold tracking-tight text-white">Programs</h2>
-            <p className="mt-2 text-slate-400">Select one or more programs to register.</p>
-          </div>
+          <h2 className="font-display text-3xl font-semibold tracking-tight text-white">Featured program</h2>
           <Link href="/programs" className="text-sm text-yellow-200 hover:underline">View all programs →</Link>
         </div>
         {!programs.isLoading && !programs.error && !anyOpen && <p role="status" className="mt-5 rounded-xl border border-yellow-300/25 bg-yellow-300/5 px-4 py-3 text-sm text-yellow-100">Registration is currently unavailable — no programs are open right now.</p>}
-        <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{showcase.map(p => <ProgramCard key={p.id} program={p} />)}</div>
+        {featured
+          ? <div className="mt-6 max-w-md"><ProgramCard program={featured} /></div>
+          : !programs.isLoading && <p className="mt-5 text-slate-400">No programs to show yet — check back soon.</p>}
       </section>
 
       {links.length > 0 && (

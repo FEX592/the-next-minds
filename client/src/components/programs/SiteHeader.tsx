@@ -18,6 +18,7 @@ export function PageShell({ children, hideSelectionBar }: { children: React.Reac
             <span className="font-display text-sm font-semibold tracking-[.22em] text-white">THE NEXT MIND</span>
           </Link>
           <nav className="flex items-center gap-5 text-sm text-slate-300">
+            <Link href="/" className="hover:text-white">Home</Link>
             <Link href="/programs" className="hover:text-white">Programs</Link>
             <Link href="/partner" className="hidden hover:text-white sm:inline">Partner</Link>
             <Link href="/contact" className="hidden hover:text-white sm:inline">Contact</Link>
