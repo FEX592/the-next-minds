@@ -21,3 +21,10 @@ export const localDraftService: DraftService = {
     window.localStorage.removeItem(STORAGE_KEY);
   },
 };
+
+/** For one-off windows (replies, template editing) that must not touch the shared local draft. */
+export const noopDraftService: DraftService = {
+  async load() { return null; },
+  async save(draft) { return { ...draft, updatedAt: new Date().toISOString() }; },
+  async remove() {},
+};

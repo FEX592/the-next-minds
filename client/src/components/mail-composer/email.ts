@@ -48,3 +48,11 @@ export const generateEmailHtml = (content: string, attachments: Attachment[], br
   const heroMarkup = heroImage ? `<img src="${escapeHtml(heroImage)}" alt="${brandName} — ${tagline}" style="display:block;width:100%;max-height:340px;object-fit:cover;" />` : '';
   return `<!doctype html><html><body style="margin:0;background:#070b14;font-family:Arial,Helvetica,sans-serif;color:#e8eef9;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#070b14;width:100%;"><tr><td align="center" style="padding:24px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:620px;background:#0f1726;border:1px solid #263650;border-radius:16px;overflow:hidden;width:100%;">${heroMarkup}<tr><td style="padding:28px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.65;color:#e8eef9;">${safeContent}${imageMarkup}${attachmentMarkup}</td></tr><tr><td style="padding:17px 28px;background:#0b1220;color:#7d8ca3;font:11px Arial,sans-serif;">${brandName} · ${tagline}</td></tr></table></td></tr></table></body></html>`;
 };
+
+const SAMPLE_VALUES: Record<string, string> = { firstName: 'Amara', lastName: 'Okafor', fullName: 'Amara Okafor', school: 'Example Secondary School', classLevel: 'SS2', country: 'Nigeria', email: 'amara@example.com', whatsapp: '+2348012345678', groupLink: '#', channelLink: '#' };
+
+/** Template preview: fills {{merge fields}} with sample data and wraps the sanitized fragment in a document. */
+export const renderTemplatePreview = (content: string) => {
+  const filled = (content || '<p>Nothing to preview yet.</p>').replace(/\{\{(\w+)\}\}/g, (match, key: string) => SAMPLE_VALUES[key] ?? match);
+  return `<!doctype html><html><body style="margin:0;">${sanitizeEditorHtml(filled)}</body></html>`;
+};

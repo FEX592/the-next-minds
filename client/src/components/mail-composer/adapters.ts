@@ -7,8 +7,8 @@ import type { Attachment, AttachmentService, EmailMessage, MailSender, SendResul
  * numeric media id (stringified) so MailSender below can recover it.
  */
 export function createMediaAttachmentService(uploadMedia: {
-  mutateAsync: (input: { filename: string; mimeType: string; dataBase64: string; placement: "INLINE" | "ATTACHMENT" }) => Promise<{ id?: number; url: string; filename: string; mimeType: string }>;
-}): AttachmentService {
+  mutateAsync: (input: { filename: string; mimeType: string; dataBase64: string; placement: "INLINE" | "ATTACHMENT"; templateId?: number }) => Promise<{ id?: number; url: string; filename: string; mimeType: string }>;
+}, options: { templateId?: number } = {}): AttachmentService {
   return {
     async upload(file: File): Promise<Attachment> {
       const dataBase64 = await new Promise<string>((resolve, reject) => {
@@ -26,6 +26,7 @@ export function createMediaAttachmentService(uploadMedia: {
         // support inline CID — see the earlier SEO/email work); everything else
         // is a real attachment delivered via the host's sender.
         placement: isImage ? "INLINE" : "ATTACHMENT",
+        templateId: options.templateId,
       });
       return {
         id: result.id != null ? String(result.id) : `local-${Date.now()}`,
