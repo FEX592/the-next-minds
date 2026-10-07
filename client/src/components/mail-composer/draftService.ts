@@ -1,4 +1,4 @@
-import type { Draft, DraftService } from '../types/mail';
+import type { Draft, DraftService } from './types';
 
 const STORAGE_KEY = 'custom-mail-composer:draft';
 

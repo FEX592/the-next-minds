@@ -1,4 +1,4 @@
-import type { Attachment } from './types/mail';
+import type { Attachment } from './types';
 
 interface AttachmentListProps {
   attachments: Attachment[];

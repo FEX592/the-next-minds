@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { isValidEmail } from './utils/emailValidation';
-import type { RecipientField } from './types/mail';
+import { isValidEmail } from './emailValidation';
+import type { RecipientField } from './types';
 
 interface RecipientInputProps {
   field: RecipientField;

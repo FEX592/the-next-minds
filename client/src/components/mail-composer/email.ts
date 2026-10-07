@@ -1,4 +1,4 @@
-import type { Attachment } from '../types/mail';
+import type { Attachment } from './types';
 
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char] ?? char);
@@ -11,7 +11,7 @@ export const sanitizeEditorHtml = (html: string) => {
   template.innerHTML = html;
   template.content.querySelectorAll('script, iframe, object, embed, form').forEach((node) => node.remove());
   template.content.querySelectorAll('*').forEach((node) => {
-    Array.from(node.attributes).forEach((attribute) => {
+    [...node.attributes].forEach((attribute) => {
       if (attribute.name.toLowerCase().startsWith('on')) node.removeAttribute(attribute.name);
       if (attribute.name === 'href' && !/^(https?:|mailto:|#)/i.test(attribute.value)) node.removeAttribute(attribute.name);
       if (attribute.name === 'src' && !/^(https?:|blob:|cid:)/i.test(attribute.value)) node.removeAttribute(attribute.name);

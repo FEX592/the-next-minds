@@ -3,31 +3,28 @@ import { AttachmentList } from './AttachmentList';
 import { PreviewPane } from './PreviewPane';
 import { RecipientInput } from './RecipientInput';
 import { RichEditor } from './RichEditor';
-import { mockAttachmentService } from './services/attachmentService';
-import { localDraftService } from './services/draftService';
-import { mockMailSender } from './services/mailSender';
-import type { Attachment, Draft, MailComposerServices } from './types/mail';
-import { generateEmailHtml, htmlToText, type EmailBranding } from './utils/email';
-import { isValidEmail } from './utils/emailValidation';
+import { localDraftService } from './draftService';
+import type { Attachment, Draft, MailComposerServices } from './types';
+import { generateEmailHtml, htmlToText, type EmailBranding } from './email';
+import { isValidEmail } from './emailValidation';
 
 interface MailComposerProps extends MailComposerServices {
   onClose?: () => void;
   /** Branding used by the generated recipient HTML and its preview. */
   branding?: EmailBranding;
-  initialDraft?: Partial<Pick<Draft, 'to' | 'cc' | 'bcc' | 'subject' | 'content' | 'attachments'>>;
-  onDraftChange?: (draft: Draft) => void;
-  onGeneratedHtmlChange?: (html: string) => void;
-  showFooter?: boolean;
-  recipientOverride?: string[];
+  /** Pre-fills the To field — e.g. from a recipient picker the host already has. */
+  initialTo?: string[];
+  /** Pre-fills the subject field. */
+  initialSubject?: string;
 }
 
 type SaveStatus = 'loading' | 'saved' | 'saving' | 'unsaved' | 'error';
 
 const starterContent = '<p style="margin:0 0 16px;"><strong>Hi there,</strong></p><p style="margin:0 0 16px;">Write a thoughtful update, share a launch, or send a note that feels considered.</p><p style="margin:0;"><a href="https://example.com" style="color:#0d6d71;text-decoration:underline;">Explore the story →</a></p>';
-const createDraft = (initialDraft?: MailComposerProps['initialDraft']): Draft => ({ id: `draft-${Date.now()}`, updatedAt: new Date().toISOString(), to: [], cc: [], bcc: [], subject: '', content: starterContent, attachments: [], ...initialDraft });
+const createDraft = (initialTo: string[] = [], initialSubject = ''): Draft => ({ id: `draft-${Date.now()}`, updatedAt: new Date().toISOString(), to: initialTo, cc: [], bcc: [], subject: initialSubject, content: starterContent, attachments: [] });
 
-export function MailComposer({ mailSender = mockMailSender, draftService = localDraftService, attachmentService = mockAttachmentService, onClose, branding, initialDraft, onDraftChange, onGeneratedHtmlChange, showFooter = true, recipientOverride }: MailComposerProps) {
-  const [draft, setDraft] = useState<Draft>(() => createDraft(initialDraft));
+export function MailComposer({ mailSender, draftService = localDraftService, attachmentService, onClose, branding, initialTo, initialSubject }: MailComposerProps) {
+  const [draft, setDraft] = useState<Draft>(() => createDraft(initialTo, initialSubject));
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('loading');
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
@@ -44,11 +41,15 @@ export function MailComposer({ mailSender = mockMailSender, draftService = local
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const hasLoaded = useRef(false);
 
+  if (!mailSender || !attachmentService) throw new Error('MailComposer requires real mailSender and attachmentService adapters in this project.');
+
   useEffect(() => {
     let active = true;
     draftService.load().then((saved) => {
       if (!active) return;
-      if (saved) {
+      // Don't clobber an explicit initialTo/initialSubject (e.g. recipients picked
+      // in the host admin UI) with a stale unrelated draft from a previous session.
+      if (saved && !initialTo?.length) {
         setDraft(saved);
         setShowCc(saved.cc.length > 0);
         setShowBcc(saved.bcc.length > 0);
@@ -58,6 +59,7 @@ export function MailComposer({ mailSender = mockMailSender, draftService = local
       setSaveStatus('saved');
     }).catch(() => { hasLoaded.current = true; setSaveStatus('error'); });
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftService]);
 
   useEffect(() => {
@@ -71,9 +73,6 @@ export function MailComposer({ mailSender = mockMailSender, draftService = local
   }, [draft, draftService]);
 
   const generatedHtml = useMemo(() => generateEmailHtml(draft.content, draft.attachments, branding), [draft.content, draft.attachments, branding]);
-
-  useEffect(() => { onDraftChange?.(draft); }, [draft, onDraftChange]);
-  useEffect(() => { onGeneratedHtmlChange?.(generatedHtml); }, [generatedHtml, onGeneratedHtmlChange]);
 
   const updateDraft = (patch: Partial<Draft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -121,13 +120,12 @@ export function MailComposer({ mailSender = mockMailSender, draftService = local
   };
 
   const send = async () => {
-    const recipients = recipientOverride ?? draft.to;
-    if (!recipients.length || recipients.some((email) => !isValidEmail(email))) return setValidationError('Add at least one valid recipient in the To field.');
+    if (!draft.to.length || draft.to.some((email) => !isValidEmail(email))) return setValidationError('Add at least one valid recipient in the To field.');
     if (!draft.subject.trim()) return setValidationError('Add a subject before sending.');
     if (!htmlToText(draft.content)) return setValidationError('Add some content before sending.');
     if (draft.attachments.some((attachment) => attachment.status === 'uploading')) return setValidationError('Wait for attachments to finish uploading.');
     setIsSending(true); setSendState('idle'); setSendError(''); setValidationError('');
-    const result = await mailSender.send({ to: recipients, cc: draft.cc, bcc: draft.bcc, subject: draft.subject, html: generatedHtml, text: htmlToText(draft.content), attachments: draft.attachments });
+    const result = await mailSender.send({ to: draft.to, cc: draft.cc, bcc: draft.bcc, subject: draft.subject, html: generatedHtml, text: htmlToText(draft.content), attachments: draft.attachments });
     setIsSending(false);
     if (result.ok) { setSendState('success'); await draftService.remove(draft.id); }
     else { setSendState('error'); setSendError(result.error ?? 'Something went wrong while sending.'); }
@@ -165,10 +163,10 @@ export function MailComposer({ mailSender = mockMailSender, draftService = local
         <AttachmentList attachments={draft.attachments} onRemove={removeAttachment} />
       </div>
 
-      {showFooter && <footer className="composer-footer">
+      <footer className="composer-footer">
         <div className="footer-left"><button type="button" className="send-button" onClick={send} disabled={isSending || sendState === 'success'}>{isSending ? <><span className="spinner" /> Sending</> : sendState === 'success' ? 'Sent ✓' : <>Send <span>↗</span></>}</button><button type="button" className="footer-icon" title="Add attachment" aria-label="Add attachment" onClick={() => attachmentInputRef.current?.click()}>⌕</button><button type="button" className="footer-icon" title="Insert image" aria-label="Insert image" onClick={() => imageInputRef.current?.click()}>▧</button></div>
         <div className="footer-right"><button type="button" className="save-draft" onClick={manualSave}>Save draft</button><span className={`draft-status ${saveStatus}`}><span className="status-dot" /> {saveLabel}</span><button type="button" className="discard-button" title="Discard draft" aria-label="Discard draft" onClick={() => setConfirmDiscard(true)}>⌫</button></div>
-      </footer>}
+      </footer>
       <input ref={attachmentInputRef} type="file" multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
       <input ref={imageInputRef} type="file" accept="image/*" hidden onChange={(event) => uploadFiles(event.target.files, true)} />
       {confirmDiscard && <div className="confirm-scrim"><div className="confirm-card"><span className="confirm-symbol">⌫</span><h3>Discard this draft?</h3><p>This will remove the local draft and cannot be undone.</p><div><button type="button" className="text-button" onClick={() => setConfirmDiscard(false)}>Keep editing</button><button type="button" className="danger-button" onClick={discard}>Discard draft</button></div></div></div>}
