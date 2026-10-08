@@ -10,6 +10,8 @@ export const programStatusEnum = pgEnum("program_status", ["UPCOMING", "ONGOING"
 export const partnershipTypeEnum = pgEnum("partnership_type", ["SPEAKING", "TRAINING", "SPONSORSHIP", "COMMUNITY_PARTNERSHIP", "CONTENT_COLLABORATION", "TECHNOLOGY_PARTNERSHIP", "OTHER"]);
 export const partnershipStatusEnum = pgEnum("partnership_status", ["NEW", "IN_REVIEW", "ACCEPTED", "DECLINED", "ARCHIVED"]);
 export const contactStatusEnum = pgEnum("contact_status", ["NEW", "READ", "ARCHIVED"]);
+export const scheduledEmailKindEnum = pgEnum("scheduled_email_kind", ["REMINDER", "FOLLOW_UP"]);
+export const deliveryStatusEnum = pgEnum("delivery_status", ["PENDING", "SENT", "FAILED"]);
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(), openId: varchar("openId", { length: 64 }).notNull().unique(), name: text("name"), email: varchar("email", { length: 320 }), passwordHash: text("passwordHash"), loginMethod: varchar("loginMethod", { length: 64 }).default("local"), role: roleEnum("role").default("user").notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().notNull(), lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -132,6 +134,23 @@ export const contactSubmissions = pgTable("contactSubmissions", {
 });
 export type PartnershipRequest = typeof partnershipRequests.$inferSelect; export type InsertPartnershipRequest = typeof partnershipRequests.$inferInsert;
 export type ContactSubmission = typeof contactSubmissions.$inferSelect; export type InsertContactSubmission = typeof contactSubmissions.$inferInsert;
+
+// --- Scheduled emails: reminders before a program, follow-ups after it (PRD Phase 6) ---
+export const scheduledEmailRules = pgTable("scheduledEmailRules", {
+  id: serial("id").primaryKey(), kind: scheduledEmailKindEnum("kind").notNull(), label: varchar("label", { length: 160 }).notNull(),
+  // Minutes before the program starts (REMINDER) or after it ends (FOLLOW_UP). Always positive.
+  offsetMinutes: integer("offsetMinutes").notNull(), enabled: boolean("enabled").notNull().default(true),
+  subject: varchar("subject", { length: 240 }).notNull(), body: text("body").notNull(), htmlBody: text("htmlBody"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export const scheduledEmailDeliveries = pgTable("scheduledEmailDeliveries", {
+  id: serial("id").primaryKey(),
+  ruleId: integer("ruleId").notNull().references(() => scheduledEmailRules.id, { onDelete: "cascade" }),
+  registrationId: integer("registrationId").notNull().references(() => registrations.id, { onDelete: "cascade" }),
+  status: deliveryStatusEnum("status").notNull().default("PENDING"), attempts: integer("attempts").notNull().default(1), error: text("error"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().notNull(), sentAt: timestamp("sentAt"),
+}, (t) => [unique("scheduledEmailDeliveries_rule_registration_key").on(t.ruleId, t.registrationId)]);
+export type ScheduledEmailRule = typeof scheduledEmailRules.$inferSelect; export type InsertScheduledEmailRule = typeof scheduledEmailRules.$inferInsert;
 
 export type User = typeof users.$inferSelect; export type InsertUser = typeof users.$inferInsert; export type Registration = typeof registrations.$inferSelect; export type InsertRegistration = typeof registrations.$inferInsert;
 export type Program = typeof programs.$inferSelect; export type InsertProgram = typeof programs.$inferInsert;

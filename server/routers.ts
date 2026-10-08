@@ -6,8 +6,11 @@ import { COOKIE_NAME } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies.js";
 import { systemRouter } from "./_core/systemRouter.js";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc.js";
-import { createAudit, createContactSubmission, createEmailLog, createNotification, createPartnershipRequest, createProgram, createSpeaker, deleteCommunityLink, deleteContactSubmission, deletePartnershipRequest, getInboxCounts, listContactSubmissions, listPartnershipRequests, listRegistrationsForExport, recentSubmissionCount, updateContactSubmissionStatus, updatePartnershipRequest, deleteRegistration, deleteSpeaker, ensureDefaults, getConfig, getDb, getEmailMedia, getProgramById, getProgramSpeakers, getProgramWebinarDetails, getPublicProgramBundle, getRegistration, getSiteSettings, getStats, listCommunityLinks, listPrograms, listRegistrations, listSpeakers, setProgramSpeakers, updateEmailLog, updateLocalAccount, updateProgram, updateSiteSettings, updateSpeaker, upsertCommunityLink, upsertProgramWebinarDetails } from "./db.js";
-import { buildConfirmationEmail, REGISTRATION_CLOSED_MESSAGE, registrationState, resolveCommunity, resolveCommunityMany, toPublicProgram } from "./programs.js";
+import { createAudit, createContactSubmission, deleteScheduledRule, listScheduledRules, saveScheduledRule, scheduledRuleStats, createEmailLog, createNotification, createPartnershipRequest, createProgram, createSpeaker, deleteCommunityLink, deleteContactSubmission, deletePartnershipRequest, getInboxCounts, listContactSubmissions, listPartnershipRequests, listRegistrationsForExport, recentSubmissionCount, updateContactSubmissionStatus, updatePartnershipRequest, deleteRegistration, deleteSpeaker, ensureDefaults, getConfig, getDb, getEmailMedia, getProgramById, getProgramSpeakers, getProgramWebinarDetails, getPublicProgramBundle, getRegistration, getSiteSettings, getStats, listCommunityLinks, listPrograms, listRegistrations, listSpeakers, setProgramSpeakers, updateEmailLog, updateLocalAccount, updateProgram, updateSiteSettings, updateSpeaker, upsertCommunityLink, upsertProgramWebinarDetails } from "./db.js";
+import { sendConfiguredEmail } from "./mailer.js";
+import { renderRuleEmail, runScheduledEmails } from "./scheduledRunner.js";
+import { buildMergeValues, describeRule } from "./scheduled.js";
+import { formatProgramDate, buildConfirmationEmail, REGISTRATION_CLOSED_MESSAGE, registrationState, resolveCommunity, resolveCommunityMany, toPublicProgram } from "./programs.js";
 import { DEFAULT_BODY, DEFAULT_HTML, DEFAULT_SUBJECT, renderTemplate, sendEmail, textToEmailHtml } from "./email.js";
 import { hashPassword, verifyPassword } from "./local-auth.js";
 import { ENV } from "./_core/env.js";
@@ -30,31 +33,6 @@ function htmlForTemplate(template: { body: string; htmlBody?: string | null; gro
   const html = template.htmlBody ? renderTemplate(template.htmlBody, { ...values, groupLink: template.groupLink ?? "", channelLink: template.channelLink ?? "" }) : DEFAULT_HTML(textToEmailHtml(body));
   return { body, html };
 }
-async function sendConfiguredEmail(input: { category: string; recipient: string; subject: string; body: string; html: string; adminId?: number; registrationId?: number; media?: Array<{ fileUrl: string; filename: string; mimeType: string; contentId?: string | null; placement: "INLINE" | "ATTACHMENT" }>; retryOf?: number }) {
-  const config = (await getConfig())?.config;
-  const db = await getDb();
-  const from = config ? `${config.senderName} <${config.senderEmail}>` : "";
-  if (!db) return { ok: false as const, error: "Database unavailable." };
-  // Registration-scoped sends (acceptance emails) have a natural stable identity —
-  // "the acceptance email for this registration" — so they get real dedup
-  // protection against double-submission. Manual sends (general broadcasts, test
-  // emails) have no such identity; each click is intentionally a new, distinct
-  // send, so they're never deduped against one another.
-  const idempotencyKey = input.registrationId && (input.category === "ACCEPTANCE" || input.category === "CONFIRMATION") ? `${input.category === "ACCEPTANCE" ? "accept" : "confirm"}-${input.registrationId}` : null;
-  if (idempotencyKey) {
-    const alreadySent = await db.select().from(emailLogs).where(and(eq(emailLogs.idempotencyKey, idempotencyKey), eq(emailLogs.status, "SENT"))).limit(1);
-    if (alreadySent[0]) return { ok: true as const, id: alreadySent[0].providerMessageId ?? String(alreadySent[0].id) };
-  }
-  const logValues = { recipient: input.recipient, emailType: input.category, subject: input.subject, registrationId: input.registrationId, status: "SENDING" as const, sentBy: input.adminId, retryOf: input.retryOf, idempotencyKey };
-  await db.insert(emailLogs).values(logValues);
-  const log = await db.select().from(emailLogs).where(and(eq(emailLogs.recipient, input.recipient), eq(emailLogs.subject, input.subject))).orderBy(desc(emailLogs.id)).limit(1);
-  const result = await sendEmail({ from, replyTo: config?.replyTo, to: [input.recipient], subject: input.subject, text: input.body, html: input.html, media: input.media });
-  if (result.ok) { if (log[0]) await updateEmailLog(log[0].id, { status: "SENT", providerMessageId: result.id }); return { ok: true as const, id: result.id }; }
-  if (log[0]) await updateEmailLog(log[0].id, { status: "FAILED", failureReason: result.error });
-  await createNotification("Email delivery failed", `${input.category} email to ${input.recipient} failed: ${result.error}`, input.registrationId, "emailFailure");
-  return result;
-}
-
 const isUniqueViolation = (error: any) => error?.code === "23505" || error?.cause?.code === "23505" || String(error?.message ?? "").toLowerCase().includes("duplicate");
 const slugSchema = z.string().trim().min(1).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers and hyphens only.");
 const optText = (max: number) => z.string().max(max).nullable();
@@ -169,6 +147,23 @@ export const appRouter = router({
     }),
   }),
   admin: router({
+    scheduledRules: adminOnly.query(async () => {
+      const [rules, stats] = await Promise.all([listScheduledRules(), scheduledRuleStats()]);
+      return { cronConfigured: Boolean(process.env.CRON_SECRET), rules: rules.map(r => ({ ...r, description: describeRule(r), sent: stats.find(x => x.ruleId === r.id && x.status === "SENT")?.n ?? 0, failed: stats.find(x => x.ruleId === r.id && x.status === "FAILED")?.n ?? 0 })) };
+    }),
+    saveScheduledRule: adminOnly.input(z.object({ id: z.number().int().positive().optional(), kind: z.enum(["REMINDER", "FOLLOW_UP"]), label: z.string().trim().min(1).max(160), offsetMinutes: z.number().int().min(5).max(60 * 24 * 60), enabled: z.boolean(), subject: z.string().trim().min(1).max(240), body: z.string().min(1), htmlBody: z.string().nullable().optional() })).mutation(async ({ ctx, input }) => { const row = await saveScheduledRule({ ...input, htmlBody: input.htmlBody ?? null }); await createAudit(`${input.id ? "Updated" : "Created"} scheduled email "${input.label}"`, ctx.user.id); return row; }),
+    deleteScheduledRule: adminOnly.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { await deleteScheduledRule(input.id); await createAudit(`Deleted scheduled email ${input.id}`, ctx.user.id); return { success: true as const }; }),
+    runScheduledNow: adminOnly.mutation(async ({ ctx }) => { const summary = await runScheduledEmails(); await createAudit(`Ran scheduled emails manually (${summary.sent} sent, ${summary.failed} failed)`, ctx.user.id); return summary; }),
+    sendScheduledTest: adminOnly.input(z.object({ ruleId: z.number().int().positive(), recipient: z.string().email() })).mutation(async ({ ctx, input }) => {
+      const rule = (await listScheduledRules()).find(r => r.id === input.ruleId);
+      if (!rule) throw new Error("Rule not found.");
+      const startAt = new Date(Date.now() + rule.offsetMinutes * 60_000);
+      const values = buildMergeValues({ registration: { firstName: "Amara", lastName: "Okafor", email: input.recipient, school: "Example Secondary School", classLevel: "SS 2", country: "Nigeria", normalizedWhatsapp: "+2348012345678" }, program: { title: "Sample Program", slug: "sample-program", startAt, durationMinutes: 60, locationOrPlatform: "Telegram (live)", takeawayCourseTitle: "Vibe Coding + Deployment + SEO", takeawayCourseUrl: `${ENV.publicAppUrl}/programs` }, joinLink: `${ENV.publicAppUrl}/programs`, recordingUrl: `${ENV.publicAppUrl}/programs`, community: { whatsapp: `${ENV.publicAppUrl}/`, telegram: `${ENV.publicAppUrl}/` }, rule, appUrl: ENV.publicAppUrl, formatDate: formatProgramDate });
+      const email = renderRuleEmail(rule, values);
+      const result = await sendConfiguredEmail({ category: `${rule.kind}_TEST`, recipient: input.recipient, subject: `[Test] ${email.subject}`, body: email.text, html: email.html, adminId: ctx.user.id });
+      if (!result.ok) throw new Error(result.error || "The test email could not be sent.");
+      return { success: true as const };
+    }),
     uploadImage: adminOnly.input(z.object({ folder: z.enum(["speakers", "programs", "seo"]), filename: z.string().min(1).max(240), dataBase64: z.string().max(4_400_000) })).mutation(async ({ ctx, input }) => {
       const raw = Buffer.from(input.dataBase64.replace(/^data:[^;]+;base64,/, ""), "base64");
       if (raw.length > 3 * 1024 * 1024) throw new Error("Image must be 3 MB or smaller.");
